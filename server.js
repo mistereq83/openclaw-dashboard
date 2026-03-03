@@ -154,6 +154,29 @@ app.get('/api/stats/export', (req, res) => {
   res.send(csv);
 });
 
+// Debug: raw cost check
+app.get('/api/debug/cost/:agentId/:sessionId', (req, res) => {
+  const { agentId, sessionId } = req.params;
+  const path2 = require('path');
+  const sessionsDir = path2.join(STATE_DIR, agentId, 'sessions');
+  const filePath = path2.join(sessionsDir, `${sessionId}.jsonl`);
+  const fs2 = require('fs');
+  if (!fs2.existsSync(filePath)) return res.json({ error: 'File not found', filePath });
+  const lines = fs2.readFileSync(filePath, 'utf-8').split('\n').filter(l => l.trim());
+  const results = [];
+  let total = 0;
+  for (const line of lines) {
+    try {
+      const obj = JSON.parse(line);
+      if (obj.usage) {
+        results.push({ type: obj.type, hasUsage: true, hasCost: !!(obj.usage.cost), cost: obj.usage.cost });
+        if (obj.usage.cost) total += obj.usage.cost.total || 0;
+      }
+    } catch {}
+  }
+  res.json({ filePath, linesTotal: lines.length, costLines: results, total });
+});
+
 // SPA fallback
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
