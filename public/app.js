@@ -6,18 +6,17 @@ const app = {
   overviewData: null,
   agentData: null,
   charts: {},
-  token: new URLSearchParams(window.location.search).get('token') || '',
+  token: localStorage.getItem('dashboard_token') || '',
   refreshInterval: null,
   countdown: 60,
 
   // --- API ---
   async api(endpoint) {
-    const sep = endpoint.includes('?') ? '&' : '?';
-    const url = `/api${endpoint}${this.token ? sep + 'token=' + encodeURIComponent(this.token) : ''}`;
-    const res = await fetch(url);
+    const headers = {};
+    if (this.token) headers['Authorization'] = 'Bearer ' + this.token;
+    const res = await fetch(`/api${endpoint}`, { headers });
     if (res.status === 401) {
-      document.getElementById('content').innerHTML =
-        '<div class="empty-state"><h2>Brak autoryzacji</h2><p>Dodaj ?token=... do URL</p></div>';
+      this.logout();
       throw new Error('Unauthorized');
     }
     return res.json();
@@ -385,7 +384,7 @@ const app = {
 
   exportCsv() {
     if (!this.currentAgent) return;
-    const url = `/api/stats/export?agent=${this.currentAgent}${this.token ? '&token=' + encodeURIComponent(this.token) : ''}`;
+    const url = `/api/stats/export?agent=${this.currentAgent}&token=${encodeURIComponent(this.token)}`;
     window.open(url, '_blank');
   },
 
@@ -489,8 +488,38 @@ const app = {
     }
   },
 
+  // --- Auth ---
+  handleLogin(e) {
+    e.preventDefault();
+    const token = document.getElementById('login-token').value.trim();
+    if (!token) return false;
+    localStorage.setItem('dashboard_token', token);
+    location.reload();
+    return false;
+  },
+
+  logout() {
+    localStorage.removeItem('dashboard_token');
+    location.reload();
+  },
+
+  checkAuth() {
+    const loginScreen = document.getElementById('login-screen');
+    const appEl = document.getElementById('app');
+    if (!this.token) {
+      loginScreen.style.display = 'flex';
+      appEl.style.display = 'none';
+      return false;
+    }
+    loginScreen.style.display = 'none';
+    appEl.style.display = '';
+    return true;
+  },
+
   // --- Init ---
   init() {
+    if (!this.checkAuth()) return;
+
     // Nav click handlers
     document.querySelectorAll('.nav-item[data-view]').forEach(el => {
       el.addEventListener('click', (e) => {

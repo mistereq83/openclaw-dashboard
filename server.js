@@ -32,7 +32,9 @@ const AGENT_IDS = (process.env.AGENT_NAMES || '').split(',').map(s => s.trim()).
 // Auth middleware
 function auth(req, res, next) {
   if (!TOKEN) return next(); // No token configured = no auth
-  const provided = req.query.token || req.headers['x-dashboard-token'] || '';
+  const bearer = (req.headers['authorization'] || '').startsWith('Bearer ')
+    ? req.headers['authorization'].slice(7) : '';
+  const provided = req.query.token || req.headers['x-dashboard-token'] || bearer || '';
   if (provided === TOKEN) return next();
   res.status(401).json({ error: 'Unauthorized. Provide ?token= or X-Dashboard-Token header.' });
 }

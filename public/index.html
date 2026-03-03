@@ -8,6 +8,19 @@
   <script src="/chart.umd.js"></script>
 </head>
 <body>
+  <!-- Login Screen -->
+  <div id="login-screen" style="display:none; position:fixed; inset:0; z-index:1000; background:var(--bg-primary); align-items:center; justify-content:center;">
+    <div style="background:var(--bg-secondary); border:1px solid var(--border); border-radius:12px; padding:40px; width:100%; max-width:360px; text-align:center;">
+      <h1 style="color:var(--text-primary); margin:0 0 4px;">OpenClaw</h1>
+      <p style="color:var(--text-muted); margin:0 0 24px; font-size:14px;">Admin Dashboard</p>
+      <form id="login-form" onsubmit="return app.handleLogin(event)">
+        <input type="password" id="login-token" placeholder="Token dostępu" class="input" style="width:100%; margin-bottom:12px; box-sizing:border-box;" autofocus>
+        <button type="submit" class="btn" style="width:100%;">Zaloguj</button>
+      </form>
+      <p id="login-error" style="color:#ef4444; margin:12px 0 0; font-size:13px; display:none;">Nieprawidłowy token</p>
+    </div>
+  </div>
+
   <div id="app">
     <aside id="sidebar">
       <div class="sidebar-header">
@@ -26,6 +39,7 @@
       </nav>
       <div class="sidebar-footer">
         <div class="refresh-info">Auto-refresh: <span id="refresh-countdown">60</span>s</div>
+        <button class="btn btn-sm" style="width:100%; margin-top:8px;" onclick="app.logout()">Wyloguj</button>
       </div>
     </aside>
 
