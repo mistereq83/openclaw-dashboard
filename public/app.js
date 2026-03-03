@@ -439,8 +439,11 @@ const app = {
   // --- Helpers ---
   getAgentName(agentId, agents) {
     const names = {
+      patryk: 'Patryk Gocek',
       patrykg: 'Patryk Gocek',
+      anna: 'Anna Gnatowska',
       annag: 'Anna Gnatowska',
+      paulina: 'Paulina Grunau',
       paulinag: 'Paulina Grunau',
       katarzynag: 'Katarzyna Goll',
       katarzynac: 'Katarzyna Chrzanowska',
