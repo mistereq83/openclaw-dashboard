@@ -37,8 +37,11 @@ function auth(req, res, next) {
   res.status(401).json({ error: 'Unauthorized. Provide ?token= or X-Dashboard-Token header.' });
 }
 
-app.use(auth);
+// Static files — no auth required (CSS, JS etc.)
 app.use(express.static(path.join(__dirname, 'public')));
+
+// Auth required only for API
+app.use('/api', auth);
 
 // --- API Routes ---
 
