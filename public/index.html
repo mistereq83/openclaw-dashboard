@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OpenClaw Dashboard</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar">
+      <div class="sidebar-header">
+        <h1>OpenClaw</h1>
+        <span class="subtitle">Admin Dashboard</span>
+      </div>
+      <nav>
+        <a href="#" class="nav-item active" data-view="overview">
+          <span class="nav-icon">&#9632;</span> Overview
+        </a>
+        <a href="#" class="nav-item" data-view="compare">
+          <span class="nav-icon">&#9638;</span> Porównanie
+        </a>
+        <div class="nav-divider">Agenci</div>
+        <div id="agent-nav"></div>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="refresh-info">Auto-refresh: <span id="refresh-countdown">60</span>s</div>
+      </div>
+    </aside>
+
+    <main id="content">
+      <!-- Overview View -->
+      <div id="view-overview" class="view active">
+        <div class="page-header">
+          <h2>Overview</h2>
+          <div class="header-actions">
+            <button class="btn btn-sm" onclick="app.refresh()">&#x21bb; Odśwież</button>
+          </div>
+        </div>
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-value" id="stat-agents-online">-</div>
+            <div class="stat-label">Agentów online</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="stat-agents-offline">-</div>
+            <div class="stat-label">Agentów offline</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="stat-today-messages">-</div>
+            <div class="stat-label">Wiadomości dziś</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="stat-total-agents">-</div>
+            <div class="stat-label">Łącznie agentów</div>
+          </div>
+        </div>
+        <div class="charts-row">
+          <div class="chart-card">
+            <h3>Aktywność per agent (ostatnie 7 dni)</h3>
+            <canvas id="chart-activity-7d"></canvas>
+          </div>
+          <div class="chart-card">
+            <h3>Top 5 najbardziej aktywnych dni</h3>
+            <canvas id="chart-top-days"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Agent Detail View -->
+      <div id="view-agent" class="view">
+        <div class="page-header">
+          <h2 id="agent-title">Agent</h2>
+          <div class="header-actions">
+            <button class="btn btn-sm" onclick="app.exportCsv()">&#x2913; Eksport CSV</button>
+            <button class="btn btn-sm" onclick="app.showSessions()">&#x1f4cb; Sesje</button>
+          </div>
+        </div>
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-value" id="agent-sessions-total">-</div>
+            <div class="stat-label">Sesji total</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="agent-sessions-week">-</div>
+            <div class="stat-label">Sesji w tym tygodniu</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="agent-sessions-today">-</div>
+            <div class="stat-label">Sesji dziś</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="agent-messages-total">-</div>
+            <div class="stat-label">Wiadomości total</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="agent-messages-week">-</div>
+            <div class="stat-label">Wiadomości w tym tyg.</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="agent-messages-today">-</div>
+            <div class="stat-label">Wiadomości dziś</div>
+          </div>
+        </div>
+        <div class="charts-row">
+          <div class="chart-card">
+            <h3>Timeline (ostatnie 30 dni)</h3>
+            <canvas id="chart-agent-timeline"></canvas>
+          </div>
+          <div class="chart-card">
+            <h3>Heatmapa aktywności</h3>
+            <canvas id="chart-agent-heatmap"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Compare View -->
+      <div id="view-compare" class="view">
+        <div class="page-header">
+          <h2>Porównanie agentów</h2>
+        </div>
+        <div class="table-wrapper">
+          <table id="compare-table">
+            <thead>
+              <tr>
+                <th data-sort="name">Agent <span class="sort-arrow"></span></th>
+                <th data-sort="sessionsTotal">Sesje <span class="sort-arrow"></span></th>
+                <th data-sort="userMessagesTotal">Zapytania <span class="sort-arrow"></span></th>
+                <th data-sort="avgPerDay">Avg/dzień <span class="sort-arrow"></span></th>
+                <th data-sort="lastActivity">Ostatnia aktywność <span class="sort-arrow"></span></th>
+              </tr>
+            </thead>
+            <tbody id="compare-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Sessions View -->
+      <div id="view-sessions" class="view">
+        <div class="page-header">
+          <h2 id="sessions-title">Sesje</h2>
+          <div class="header-actions">
+            <button class="btn btn-sm" onclick="app.backToAgent()">&#x2190; Powrót</button>
+          </div>
+        </div>
+        <div class="filters-bar">
+          <input type="text" id="search-query" placeholder="Szukaj w treści..." class="input">
+          <input type="date" id="filter-date-from" class="input">
+          <input type="date" id="filter-date-to" class="input">
+          <input type="number" id="filter-min-messages" placeholder="Min. wiadomości" class="input" min="1">
+          <button class="btn" onclick="app.filterSessions()">Filtruj</button>
+          <button class="btn" onclick="app.searchInSessions()">Szukaj</button>
+        </div>
+        <div id="sessions-list" class="sessions-list"></div>
+      </div>
+
+      <!-- Session Detail View -->
+      <div id="view-session-detail" class="view">
+        <div class="page-header">
+          <h2 id="session-detail-title">Sesja</h2>
+          <div class="header-actions">
+            <button class="btn btn-sm" onclick="app.showSessions()">&#x2190; Powrót do sesji</button>
+          </div>
+        </div>
+        <div id="session-messages" class="messages-container"></div>
+      </div>
+    </main>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

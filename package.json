@@ -1,0 +1,16 @@
+{
+  "name": "openclaw-dashboard",
+  "version": "1.0.0",
+  "description": "Admin dashboard for OpenClaw multi-agent system",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "generate-test-data": "node scripts/generate-test-data.js"
+  },
+  "keywords": ["openclaw", "dashboard", "admin"],
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.21.0"
+  }
+}
