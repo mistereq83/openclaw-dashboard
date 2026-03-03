@@ -8,9 +8,14 @@
     "dev": "node --watch server.js",
     "generate-test-data": "node scripts/generate-test-data.js"
   },
-  "keywords": ["openclaw", "dashboard", "admin"],
+  "keywords": [
+    "openclaw",
+    "dashboard",
+    "admin"
+  ],
   "license": "MIT",
   "dependencies": {
+    "chart.js": "^4.5.1",
     "express": "^4.21.0"
   }
 }
