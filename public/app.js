@@ -55,6 +55,12 @@ const app = {
       document.getElementById('stat-agents-offline').textContent = data.agentsOffline;
       document.getElementById('stat-today-messages').textContent = data.totalMessagesToday;
       document.getElementById('stat-total-agents').textContent = data.agentCount;
+      if (document.getElementById('stat-total-cost')) {
+        document.getElementById('stat-total-cost').textContent = '$' + (data.totalCost || 0).toFixed(4);
+      }
+      if (document.getElementById('stat-total-cost-pln')) {
+        document.getElementById('stat-total-cost-pln').textContent = (data.totalCostPLN || 0).toFixed(2) + ' PLN';
+      }
 
       this.renderActivityChart(data);
       this.renderTopDaysChart(data);
@@ -137,6 +143,12 @@ const app = {
       document.getElementById('agent-messages-total').textContent = data.userMessagesTotal;
       document.getElementById('agent-messages-week').textContent = data.messagesWeek;
       document.getElementById('agent-messages-today').textContent = data.messagesToday;
+      if (document.getElementById('agent-total-cost')) {
+        document.getElementById('agent-total-cost').textContent = '$' + (data.totalCost || 0).toFixed(4);
+      }
+      if (document.getElementById('agent-total-cost-pln')) {
+        document.getElementById('agent-total-cost-pln').textContent = (data.totalCostPLN || 0).toFixed(2) + ' PLN';
+      }
 
       this.renderTimeline(data);
       this.renderHeatmap(data);
