@@ -57,16 +57,18 @@ const app = {
   },
 
   prevMonth() {
-    const [y, m] = this.currentMonth.split('-').map(Number);
-    const d = new Date(y, m - 2, 1);
-    this.currentMonth = d.toISOString().slice(0, 7);
+    let [y, m] = this.currentMonth.split('-').map(Number);
+    m--;
+    if (m < 1) { m = 12; y--; }
+    this.currentMonth = y + '-' + String(m).padStart(2, '0');
     this.loadMonthlyOverview();
   },
 
   nextMonth() {
-    const [y, m] = this.currentMonth.split('-').map(Number);
-    const d = new Date(y, m, 1);
-    this.currentMonth = d.toISOString().slice(0, 7);
+    let [y, m] = this.currentMonth.split('-').map(Number);
+    m++;
+    if (m > 12) { m = 1; y++; }
+    this.currentMonth = y + '-' + String(m).padStart(2, '0');
     this.loadMonthlyOverview();
   },
 
