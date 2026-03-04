@@ -535,10 +535,68 @@ const app = {
   // --- Analysis ---
   async loadAnalysis() {
     this.checkOllamaStatus();
-    // Show cached report if available
-    const el = document.getElementById('analysis-details');
-    if (!this.analysisReport) {
-      el.innerHTML = '<div class="empty-state">Kliknij "Generuj raport" aby przeanalizować rozmowy za pomocą AI</div>';
+
+    // Set date picker to today
+    const datePicker = document.getElementById('analysis-date');
+    if (!datePicker.value) {
+      datePicker.value = new Date().toISOString().split('T')[0];
+    }
+
+    // Populate agent filter
+    this.populateAgentFilter();
+
+    // Load available days list
+    this.loadAvailableDays();
+
+    // Try to load today's report if it exists
+    this.loadDayReport(true);
+  },
+
+  async populateAgentFilter() {
+    try {
+      const agents = await this.api('/agents');
+      const select = document.getElementById('analysis-agent-filter');
+      select.innerHTML = '<option value="">Wszyscy agenci</option>';
+      for (const agent of agents) {
+        select.innerHTML += '<option value="' + agent.id + '">' + this.escapeHtml(agent.name) + '</option>';
+      }
+    } catch {}
+  },
+
+  async loadAvailableDays() {
+    try {
+      const days = await this.api('/analysis/days');
+      const container = document.getElementById('analysis-days-list');
+      if (days.length === 0) {
+        container.innerHTML = '<div class="empty-state">Brak zapisanych analiz. Kliknij "⚡ Analizuj na żywo" aby uruchomić pierwszą analizę.</div>';
+        return;
+      }
+      container.innerHTML = '<h3 style="margin-bottom:12px; color:var(--text-muted); font-size:12px; text-transform:uppercase; letter-spacing:1px;">Dostępne raporty</h3>';
+      for (const day of days.slice(0, 14)) {
+        container.innerHTML += '<div class="day-card" onclick="document.getElementById(\'analysis-date\').value=\'' + day + '\'; app.loadDayReport();">' +
+          '<span class="day-card-date">' + day + '</span>' +
+          '<span style="font-size:12px; color:var(--text-muted);">Kliknij aby otworzyć →</span>' +
+          '</div>';
+      }
+    } catch {}
+  },
+
+  async loadDayReport(silent) {
+    const dateStr = document.getElementById('analysis-date').value;
+    const agentFilter = document.getElementById('analysis-agent-filter').value;
+    if (!dateStr) return;
+
+    try {
+      const url = '/analysis/day/' + dateStr + (agentFilter ? '?agent=' + agentFilter : '');
+      const report = await this.api(url);
+      this.analysisReport = report;
+      document.getElementById('analysis-days-list').innerHTML = '';
+      this.renderAnalysisReport(report);
+    } catch (e) {
+      if (!silent) {
+        document.getElementById('analysis-overview').style.display = 'none';
+        document.getElementById('analysis-details').innerHTML = '<div class="empty-state">Brak raportu dla ' + dateStr + '. Kliknij "⚡ Analizuj na żywo" aby wygenerować.</div>';
+      }
     }
   },
 
@@ -555,6 +613,16 @@ const app = {
       } else {
         badge.textContent = '● Ollama offline';
         badge.className = 'ollama-badge offline';
+      }
+      // Scheduler status
+      const schedEl = document.getElementById('scheduler-status');
+      if (status.scheduler) {
+        const s = status.scheduler;
+        if (s.enabled) {
+          schedEl.textContent = '🕐 Auto-analiza: ' + s.cronTime + (s.isRunning ? ' (w trakcie...)' : '');
+        } else {
+          schedEl.textContent = '⏸ Auto-analiza wyłączona';
+        }
       }
     } catch {
       const badge = document.getElementById('ollama-status');
@@ -576,8 +644,9 @@ const app = {
     progressText.textContent = 'Łączę z Ollama...';
     progressBar.style.width = '2%';
 
+    const dateStr = document.getElementById('analysis-date').value || new Date().toISOString().split('T')[0];
     const tokenParam = this.token ? `&token=${encodeURIComponent(this.token)}` : '';
-    const es = new EventSource(`/api/analysis/stream?limit=3${tokenParam}`);
+    const es = new EventSource(`/api/analysis/stream?date=${dateStr}${tokenParam}`);
 
     this.streamResults = { agents: [], model: '' };
 
@@ -729,6 +798,9 @@ const app = {
     // Agent quality chart
     this.renderAgentQualityChart(report);
 
+    // Trend chart
+    this.loadTrendChart();
+
     // Topics
     const allTopics = {};
     for (const agent of report.agents) {
@@ -841,6 +913,51 @@ const app = {
         },
       },
     });
+  },
+
+  async loadTrendChart() {
+    try {
+      const trend = await this.api('/analysis/trend?days=14');
+      if (trend.length < 2) return;
+
+      const ctx = document.getElementById('chart-quality-trend');
+      if (this.charts.qualityTrend) this.charts.qualityTrend.destroy();
+
+      this.charts.qualityTrend = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: trend.map(d => d.date.slice(5)),
+          datasets: [
+            {
+              label: 'Jakość agenta',
+              data: trend.map(d => d.avgQuality),
+              borderColor: '#22c55e',
+              backgroundColor: '#22c55e33',
+              fill: true,
+              tension: 0.3,
+              pointRadius: 3,
+            },
+            {
+              label: 'Sentiment ×10',
+              data: trend.map(d => d.avgSentiment ? d.avgSentiment * 10 : null),
+              borderColor: '#3b82f6',
+              backgroundColor: '#3b82f633',
+              fill: false,
+              tension: 0.3,
+              pointRadius: 3,
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { labels: { color: '#8b8fa3', font: { size: 11 } } } },
+          scales: {
+            x: { ticks: { color: '#5a5e72' }, grid: { color: '#2a2f42' } },
+            y: { min: 0, max: 10, ticks: { color: '#5a5e72' }, grid: { color: '#2a2f42' } },
+          },
+        },
+      });
+    } catch {}
   },
 
   renderScoreDots(score) {

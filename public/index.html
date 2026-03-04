@@ -186,10 +186,25 @@
           <h2>Analiza AI</h2>
           <div class="header-actions">
             <span id="ollama-status" class="ollama-badge">Sprawdzam...</span>
-            <button class="btn btn-sm" onclick="app.generateReport()">&#x26A1; Generuj raport</button>
           </div>
         </div>
 
+        <!-- Controls bar -->
+        <div class="analysis-controls">
+          <div class="controls-left">
+            <input type="date" id="analysis-date" class="input" />
+            <select id="analysis-agent-filter" class="input">
+              <option value="">Wszyscy agenci</option>
+            </select>
+            <button class="btn" onclick="app.loadDayReport()">📊 Pokaż raport</button>
+            <button class="btn" onclick="app.generateReport()" style="border-color:var(--accent); color:var(--accent);">⚡ Analizuj na żywo</button>
+          </div>
+          <div class="controls-right">
+            <span id="scheduler-status" style="font-size:11px; color:var(--text-muted); font-family:'Fira Code',monospace;"></span>
+          </div>
+        </div>
+
+        <!-- Progress bar (for live analysis) -->
         <div id="analysis-status-bar" class="analysis-status-bar" style="display:none;">
           <div class="analysis-progress">
             <span id="analysis-progress-text">Analizuję...</span>
@@ -197,6 +212,7 @@
           </div>
         </div>
 
+        <!-- Day summary stats -->
         <div id="analysis-overview" style="display:none;">
           <div class="stats-grid" id="analysis-stats"></div>
 
@@ -207,16 +223,25 @@
 
           <div class="charts-row">
             <div class="chart-card">
+              <h3>Trend jakości (ostatnie dni)</h3>
+              <canvas id="chart-quality-trend"></canvas>
+            </div>
+            <div class="chart-card">
               <h3>Najczęstsze tematy</h3>
               <div id="analysis-topics"></div>
             </div>
-            <div class="chart-card">
-              <h3>Wykryte problemy</h3>
-              <div id="analysis-issues"></div>
-            </div>
+          </div>
+
+          <div class="chart-card" style="margin-bottom:20px;">
+            <h3>Wykryte problemy</h3>
+            <div id="analysis-issues"></div>
           </div>
         </div>
 
+        <!-- Available days (when no date selected) -->
+        <div id="analysis-days-list"></div>
+
+        <!-- Session details -->
         <div id="analysis-details" style="margin-top:20px;"></div>
       </div>
 

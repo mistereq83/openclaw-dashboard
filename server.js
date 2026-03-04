@@ -22,6 +22,8 @@ loadEnv();
 const { getAgentDisplayName, AGENT_DISPLAY_NAMES, listSessions, getSessionMessages, searchSessions } = require('./lib/parser');
 const { getAgentStats, getOverviewStats, generateCsvExport } = require('./lib/stats');
 const { analyzeSession, analyzeBatch, checkOllamaStatus, OLLAMA_MODEL } = require('./lib/ollama');
+const { runDailyAnalysis, loadReport, listAvailableDays, getTrend } = require('./lib/daily-analysis');
+const scheduler = require('./lib/scheduler');
 const cache = require('./lib/cache');
 
 const app = express();
@@ -157,10 +159,35 @@ app.get('/api/stats/export', (req, res) => {
 
 // --- AI Analysis Routes ---
 
-// GET /api/analysis/status — check Ollama connectivity
+// GET /api/analysis/status — check Ollama connectivity + scheduler
 app.get('/api/analysis/status', async (req, res) => {
-  const status = await checkOllamaStatus();
-  res.json(status);
+  const ollamaStatus = await checkOllamaStatus();
+  const schedulerStatus = scheduler.status();
+  res.json({ ...ollamaStatus, scheduler: schedulerStatus });
+});
+
+// GET /api/analysis/days — list available analysis days
+app.get('/api/analysis/days', (req, res) => {
+  res.json(listAvailableDays());
+});
+
+// GET /api/analysis/trend — quality trend over time
+app.get('/api/analysis/trend', (req, res) => {
+  const days = parseInt(req.query.days || '30', 10);
+  res.json(getTrend(days));
+});
+
+// GET /api/analysis/day/:date — get report for specific date
+app.get('/api/analysis/day/:date', (req, res) => {
+  const dateStr = req.params.date;
+  const agentFilter = req.query.agent;
+  const report = loadReport(dateStr);
+  if (!report) return res.status(404).json({ error: 'Brak raportu dla tego dnia' });
+
+  if (agentFilter) {
+    report.agents = report.agents.filter(a => a.agentId === agentFilter);
+  }
+  res.json(report);
 });
 
 // POST /api/agents/:name/sessions/:id/analyze — analyze single session
@@ -170,106 +197,21 @@ app.post('/api/agents/:name/sessions/:id/analyze', async (req, res) => {
   if (!AGENT_IDS.includes(agentId)) {
     return res.status(404).json({ error: 'Agent not found' });
   }
-
-  // Check cache first
   const cacheKey = `analysis-${agentId}-${sessionId}`;
   const cached = cache.get(cacheKey);
-  if (cached && !req.query.force) {
-    return res.json({ ...cached, cached: true });
-  }
+  if (cached && !req.query.force) return res.json({ ...cached, cached: true });
 
   const messages = getSessionMessages(STATE_DIR, agentId, sessionId);
-  if (messages.length === 0) {
-    return res.json({ error: 'Brak wiadomości w sesji' });
-  }
+  if (messages.length === 0) return res.json({ error: 'Brak wiadomości w sesji' });
 
   const analysis = await analyzeSession(messages);
-
-  if (!analysis.error) {
-    cache.set(cacheKey, analysis);
-  }
-
+  if (!analysis.error) cache.set(cacheKey, analysis);
   res.json(analysis);
 });
 
-// POST /api/agents/:name/analyze-recent — analyze last N sessions for agent
-app.post('/api/agents/:name/analyze-recent', async (req, res) => {
-  const agentId = req.params.name;
-  if (!AGENT_IDS.includes(agentId)) {
-    return res.status(404).json({ error: 'Agent not found' });
-  }
-
-  const limit = Math.min(parseInt(req.query.limit || '5', 10), 20);
-  const sessions = listSessions(STATE_DIR, agentId).slice(0, limit);
-
-  const sessionsWithMessages = sessions
-    .map(s => ({
-      sessionId: s.id,
-      agentId,
-      messages: getSessionMessages(STATE_DIR, agentId, s.id),
-    }))
-    .filter(s => s.messages.length > 0);
-
-  const results = await analyzeBatch(sessionsWithMessages);
-  res.json({
-    agentId,
-    agentName: getAgentDisplayName(agentId),
-    model: OLLAMA_MODEL,
-    analyzedAt: new Date().toISOString(),
-    sessions: results,
-  });
-});
-
-// GET /api/analysis/report — aggregate analysis report (legacy, non-streaming)
-app.get('/api/analysis/report', async (req, res) => {
-  const cacheKey = 'analysis-report';
-  const cached = cache.get(cacheKey);
-  if (cached && !req.query.force) {
-    return res.json({ ...cached, cached: true });
-  }
-
-  const limit = Math.min(parseInt(req.query.limit || '3', 10), 10);
-  const report = { agents: [], generatedAt: new Date().toISOString(), model: OLLAMA_MODEL };
-
-  for (const agentId of AGENT_IDS) {
-    const sessions = listSessions(STATE_DIR, agentId).slice(0, limit);
-    const results = [];
-
-    for (const session of sessions) {
-      const messages = getSessionMessages(STATE_DIR, agentId, session.id);
-      if (messages.length === 0) continue;
-      const analysis = await analyzeSession(messages);
-      results.push({ sessionId: session.id, ...analysis });
-    }
-
-    const validResults = results.filter(r => !r.error);
-    const avgQuality = validResults.length > 0
-      ? Math.round((validResults.reduce((sum, r) => sum + (r.agentQuality || 0), 0) / validResults.length) * 10) / 10
-      : null;
-    const avgSentiment = validResults.length > 0
-      ? Math.round((validResults.reduce((sum, r) => sum + (r.sentimentScore || 0), 0) / validResults.length) * 100) / 100
-      : null;
-
-    report.agents.push({
-      agentId,
-      agentName: getAgentDisplayName(agentId),
-      sessionsAnalyzed: results.length,
-      avgAgentQuality: avgQuality,
-      avgSentimentScore: avgSentiment,
-      issues: validResults.flatMap(r => (r.issues || []).map(i => ({ session: r.sessionId, issue: i }))),
-      escalationsNeeded: validResults.filter(r => r.escalationNeeded).length,
-      topTopics: getTopTopics(validResults),
-      sessions: results,
-    });
-  }
-
-  cache.set(cacheKey, report);
-  res.json(report);
-});
-
-// GET /api/analysis/stream — SSE streaming analysis (real-time progress)
+// GET /api/analysis/stream — SSE streaming analysis for a specific date
 app.get('/api/analysis/stream', (req, res) => {
-  const limit = Math.min(parseInt(req.query.limit || '3', 10), 10);
+  const dateStr = req.query.date || new Date().toISOString().split('T')[0];
 
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
@@ -282,99 +224,19 @@ app.get('/api/analysis/stream', (req, res) => {
     res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
   };
 
-  // Build work plan
-  const plan = [];
-  for (const agentId of AGENT_IDS) {
-    const sessions = listSessions(STATE_DIR, agentId).slice(0, limit);
-    const sessionsWithMessages = sessions
-      .map(s => ({ session: s, messages: getSessionMessages(STATE_DIR, agentId, s.id) }))
-      .filter(s => s.messages.length > 0);
-    plan.push({ agentId, agentName: getAgentDisplayName(agentId), sessions: sessionsWithMessages });
-  }
-
-  const totalSessions = plan.reduce((s, p) => s + p.sessions.length, 0);
-  send('init', { totalAgents: plan.length, totalSessions, model: OLLAMA_MODEL });
-
   let closed = false;
   req.on('close', () => { closed = true; });
 
-  (async () => {
-    let sessionsDone = 0;
-    const allAgentResults = [];
+  send('init', { date: dateStr, totalAgents: AGENT_IDS.length, model: OLLAMA_MODEL });
 
-    for (let ai = 0; ai < plan.length; ai++) {
-      if (closed) return;
-      const { agentId, agentName, sessions } = plan[ai];
-
-      send('agent-start', {
-        agentId,
-        agentName,
-        agentIndex: ai + 1,
-        totalAgents: plan.length,
-        sessionsCount: sessions.length,
-      });
-
-      const agentResults = [];
-
-      for (let si = 0; si < sessions.length; si++) {
-        if (closed) return;
-        const { session, messages } = sessions[si];
-
-        send('session-start', {
-          agentId,
-          agentName,
-          sessionId: session.id,
-          sessionIndex: si + 1,
-          sessionsCount: sessions.length,
-          messageCount: messages.length,
-          progress: Math.round((sessionsDone / Math.max(totalSessions, 1)) * 100),
-        });
-
-        const analysis = await analyzeSession(messages);
-        sessionsDone++;
-
-        const result = { sessionId: session.id, agentId, agentName, ...analysis };
-        agentResults.push(result);
-
-        send('session-done', {
-          ...result,
-          progress: Math.round((sessionsDone / Math.max(totalSessions, 1)) * 100),
-        });
-      }
-
-      // Compute agent aggregates
-      const validResults = agentResults.filter(r => !r.error);
-      const avgQuality = validResults.length > 0
-        ? Math.round((validResults.reduce((sum, r) => sum + (r.agentQuality || 0), 0) / validResults.length) * 10) / 10
-        : null;
-      const avgSentiment = validResults.length > 0
-        ? Math.round((validResults.reduce((sum, r) => sum + (r.sentimentScore || 0), 0) / validResults.length) * 100) / 100
-        : null;
-
-      const agentSummary = {
-        agentId,
-        agentName,
-        sessionsAnalyzed: agentResults.length,
-        avgAgentQuality: avgQuality,
-        avgSentimentScore: avgSentiment,
-        issues: validResults.flatMap(r => (r.issues || []).map(i => ({ session: r.sessionId, issue: i }))),
-        escalationsNeeded: validResults.filter(r => r.escalationNeeded).length,
-        topTopics: getTopTopics(validResults),
-        sessions: agentResults,
-      };
-
-      allAgentResults.push(agentSummary);
-      send('agent-done', agentSummary);
+  runDailyAnalysis(STATE_DIR, AGENT_IDS, dateStr, (event, data) => {
+    if (!closed) send(event, data);
+  }).then(report => {
+    if (!closed) {
+      send('complete', report);
+      res.end();
     }
-
-    send('complete', {
-      agents: allAgentResults,
-      generatedAt: new Date().toISOString(),
-      model: OLLAMA_MODEL,
-    });
-
-    res.end();
-  })().catch(err => {
+  }).catch(err => {
     if (!closed) {
       send('error', { message: err.message });
       res.end();
@@ -382,18 +244,6 @@ app.get('/api/analysis/stream', (req, res) => {
   });
 });
 
-function getTopTopics(analyses) {
-  const counts = {};
-  for (const a of analyses) {
-    for (const topic of (a.topics || [])) {
-      counts[topic] = (counts[topic] || 0) + 1;
-    }
-  }
-  return Object.entries(counts)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 10)
-    .map(([topic, count]) => ({ topic, count }));
-}
 
 // Debug: raw cost check
 app.get('/api/debug/cost/:agentId/:sessionId', (req, res) => {
@@ -427,4 +277,7 @@ app.listen(PORT, () => {
   console.log(`OpenClaw Dashboard running on http://localhost:${PORT}`);
   console.log(`Agents: ${AGENT_IDS.map(id => `${id} (${getAgentDisplayName(id)})`).join(', ')}`);
   console.log(`State dir: ${STATE_DIR}`);
+
+  // Start nightly analysis scheduler
+  scheduler.start(STATE_DIR, AGENT_IDS);
 });
