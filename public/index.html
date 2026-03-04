@@ -55,36 +55,47 @@
             <button class="btn btn-sm" onclick="app.refresh()">&#x21bb; Odśwież</button>
           </div>
         </div>
+
+        <!-- Month Picker -->
+        <div class="month-picker">
+          <button class="btn btn-sm" onclick="app.prevMonth()">←</button>
+          <span id="month-label" class="month-label">Marzec 2026</span>
+          <button class="btn btn-sm" onclick="app.nextMonth()">→</button>
+          <select id="overview-agent-filter" class="input" style="margin-left:16px;" onchange="app.loadMonthlyOverview()">
+            <option value="">Wszyscy agenci</option>
+          </select>
+        </div>
+
         <div class="stats-grid">
           <div class="stat-card">
-            <div class="stat-value" id="stat-agents-online">-</div>
-            <div class="stat-label">Agentów online</div>
+            <div class="stat-value" id="stat-sessions">-</div>
+            <div class="stat-label">Sesji</div>
           </div>
           <div class="stat-card">
-            <div class="stat-value" id="stat-agents-offline">-</div>
-            <div class="stat-label">Agentów offline</div>
+            <div class="stat-value" id="stat-messages">-</div>
+            <div class="stat-label">Wiadomości</div>
           </div>
           <div class="stat-card">
-            <div class="stat-value" id="stat-today-messages">-</div>
-            <div class="stat-label">Wiadomości dziś</div>
+            <div class="stat-value" id="stat-user-messages">-</div>
+            <div class="stat-label">Zapytań użytkowników</div>
           </div>
           <div class="stat-card">
             <div class="stat-value" id="stat-total-agents">-</div>
-            <div class="stat-label">Łącznie agentów</div>
+            <div class="stat-label">Aktywnych agentów</div>
           </div>
           <div class="stat-card">
             <div class="stat-value" id="stat-total-cost">-</div>
-            <div class="stat-label">Koszt łączny (USD)</div>
+            <div class="stat-label">Koszt (USD)</div>
           </div>
         </div>
         <div class="charts-row">
           <div class="chart-card">
-            <h3>Aktywność per agent (ostatnie 7 dni)</h3>
-            <canvas id="chart-activity-7d"></canvas>
+            <h3>Aktywność dzienna</h3>
+            <canvas id="chart-activity-daily"></canvas>
           </div>
           <div class="chart-card">
-            <h3>Top 5 najbardziej aktywnych dni</h3>
-            <canvas id="chart-top-days"></canvas>
+            <h3>Aktywność per agent</h3>
+            <canvas id="chart-agent-bars"></canvas>
           </div>
         </div>
       </div>

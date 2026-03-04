@@ -24,6 +24,8 @@ const { getAgentStats, getOverviewStats, generateCsvExport } = require('./lib/st
 const { analyzeSession, analyzeBatch, checkOllamaStatus, OLLAMA_MODEL } = require('./lib/ollama');
 const { runDailyAnalysis, loadReport, listAvailableDays, getTrend } = require('./lib/daily-analysis');
 const scheduler = require('./lib/scheduler');
+const db = require('./lib/db');
+const { backfillStats, computeRecent } = require('./lib/stats-worker');
 const cache = require('./lib/cache');
 
 const app = express();
@@ -134,7 +136,7 @@ app.get('/api/agents/:name/search', (req, res) => {
   res.json(results);
 });
 
-// GET /api/stats/overview
+// GET /api/stats/overview — original (kept for backward compat)
 app.get('/api/stats/overview', (req, res) => {
   const cacheKey = 'overview';
   let data = cache.get(cacheKey);
@@ -143,6 +145,42 @@ app.get('/api/stats/overview', (req, res) => {
     cache.set(cacheKey, data);
   }
   res.json(data);
+});
+
+// GET /api/stats/monthly?month=2026-03 — SQLite-backed monthly overview
+app.get('/api/stats/monthly', (req, res) => {
+  const month = req.query.month || new Date().toISOString().slice(0, 7);
+  const agentFilter = req.query.agent;
+
+  const totals = db.getOverviewTotals(month);
+  const agents = agentFilter
+    ? [db.getMonthlyStats(month, agentFilter)].filter(Boolean)
+    : db.getMonthlyStats(month);
+  const timeline = db.getDailyTimelineByAgent(month);
+  const months = db.getAvailableMonths();
+
+  // Group timeline by date for chart
+  const dailyTotals = db.getDailyTimeline(month);
+
+  res.json({
+    month,
+    totals: totals || { agents: 0, sessions: 0, messages: 0, user_messages: 0, cost: 0 },
+    agents,
+    dailyTotals,
+    timeline,
+    availableMonths: months,
+  });
+});
+
+// POST /api/stats/backfill — trigger backfill (one-time setup)
+app.post('/api/stats/backfill', async (req, res) => {
+  const days = Math.min(parseInt(req.query.days || '90', 10), 365);
+  try {
+    const filled = backfillStats(STATE_DIR, AGENT_IDS, days);
+    res.json({ success: true, daysFilled: filled, agents: AGENT_IDS.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // GET /api/stats/export?agent=...&from=...&to=...
@@ -277,6 +315,14 @@ app.listen(PORT, () => {
   console.log(`OpenClaw Dashboard running on http://localhost:${PORT}`);
   console.log(`Agents: ${AGENT_IDS.map(id => `${id} (${getAgentDisplayName(id)})`).join(', ')}`);
   console.log(`State dir: ${STATE_DIR}`);
+
+  // Backfill historical stats into SQLite (runs once, fast on subsequent starts)
+  try {
+    backfillStats(STATE_DIR, AGENT_IDS, 90);
+    console.log('Historical stats backfilled into SQLite');
+  } catch (err) {
+    console.error('Backfill error:', err.message);
+  }
 
   // Start nightly analysis scheduler
   scheduler.start(STATE_DIR, AGENT_IDS);

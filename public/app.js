@@ -46,75 +46,123 @@ const app = {
     }
   },
 
+  // --- Month State ---
+  currentMonth: new Date().toISOString().slice(0, 7),
+
+  monthNames: ['Styczeń','Luty','Marzec','Kwiecień','Maj','Czerwiec','Lipiec','Sierpień','Wrzesień','Październik','Listopad','Grudzień'],
+
+  formatMonth(ym) {
+    const [y, m] = ym.split('-');
+    return this.monthNames[parseInt(m, 10) - 1] + ' ' + y;
+  },
+
+  prevMonth() {
+    const [y, m] = this.currentMonth.split('-').map(Number);
+    const d = new Date(y, m - 2, 1);
+    this.currentMonth = d.toISOString().slice(0, 7);
+    this.loadMonthlyOverview();
+  },
+
+  nextMonth() {
+    const [y, m] = this.currentMonth.split('-').map(Number);
+    const d = new Date(y, m, 1);
+    this.currentMonth = d.toISOString().slice(0, 7);
+    this.loadMonthlyOverview();
+  },
+
   // --- Overview ---
   async loadOverview() {
+    this.loadMonthlyOverview();
+    // Also load old overview for agent nav
     try {
       const data = await this.api('/stats/overview');
       this.overviewData = data;
-
-      document.getElementById('stat-agents-online').textContent = data.agentsOnline;
-      document.getElementById('stat-agents-offline').textContent = data.agentsOffline;
-      document.getElementById('stat-today-messages').textContent = data.totalMessagesToday;
-      document.getElementById('stat-total-agents').textContent = data.agentCount;
-      if (document.getElementById('stat-total-cost')) {
-        document.getElementById('stat-total-cost').textContent = '$' + (data.totalCost || 0).toFixed(4);
-      }
-      if (document.getElementById('stat-total-cost-pln')) {
-        document.getElementById('stat-total-cost-pln').textContent = (data.totalCostPLN || 0).toFixed(2) + ' PLN';
-      }
-
-      this.renderActivityChart(data);
-      this.renderTopDaysChart(data);
       this.buildAgentNav(data.agents);
+      // Populate agent filter
+      const select = document.getElementById('overview-agent-filter');
+      if (select && data.agents) {
+        select.innerHTML = '<option value="">Wszyscy agenci</option>';
+        for (const a of data.agents) {
+          select.innerHTML += '<option value="' + a.agentId + '">' + this.getAgentName(a.agentId, data.agents) + '</option>';
+        }
+      }
+    } catch {}
+  },
+
+  async loadMonthlyOverview() {
+    document.getElementById('month-label').textContent = this.formatMonth(this.currentMonth);
+    const agentFilter = document.getElementById('overview-agent-filter')?.value || '';
+    const qs = agentFilter ? '&agent=' + agentFilter : '';
+
+    try {
+      const data = await this.api('/stats/monthly?month=' + this.currentMonth + qs);
+
+      document.getElementById('stat-sessions').textContent = data.totals.sessions || 0;
+      document.getElementById('stat-messages').textContent = data.totals.messages || 0;
+      document.getElementById('stat-user-messages').textContent = data.totals.user_messages || 0;
+      document.getElementById('stat-total-agents').textContent = data.totals.agents || 0;
+      document.getElementById('stat-total-cost').textContent = '$' + (data.totals.cost || 0).toFixed(4);
+
+      this.renderDailyActivityChart(data);
+      this.renderAgentBarsChart(data);
     } catch (e) {
-      console.error('Failed to load overview:', e);
+      console.error('Failed to load monthly overview:', e);
     }
   },
 
-  renderActivityChart(data) {
-    const ctx = document.getElementById('chart-activity-7d');
-    if (this.charts.activity7d) this.charts.activity7d.destroy();
+  renderDailyActivityChart(data) {
+    const ctx = document.getElementById('chart-activity-daily');
+    if (this.charts.activityDaily) this.charts.activityDaily.destroy();
 
-    const colors = ['#6366f1', '#22c55e', '#eab308', '#ef4444', '#ec4899', '#06b6d4', '#f97316'];
-    const datasets = Object.entries(data.last7DaysActivity).map(([agentId, values], i) => ({
-      label: this.getAgentName(agentId, data.agents),
-      data: values,
-      backgroundColor: colors[i % colors.length] + '99',
-      borderColor: colors[i % colors.length],
-      borderWidth: 1,
-    }));
+    const dailyData = data.dailyTotals || [];
 
-    this.charts.activity7d = new Chart(ctx, {
+    this.charts.activityDaily = new Chart(ctx, {
       type: 'bar',
       data: {
-        labels: data.last7DaysLabels.map(d => d.slice(5)),
-        datasets,
+        labels: dailyData.map(d => d.date.slice(8)),
+        datasets: [{
+          label: 'Zapytania',
+          data: dailyData.map(d => d.user_messages),
+          backgroundColor: '#6366f199',
+          borderColor: '#6366f1',
+          borderWidth: 1,
+        }, {
+          label: 'Wszystkie',
+          data: dailyData.map(d => d.messages),
+          backgroundColor: '#22c55e44',
+          borderColor: '#22c55e',
+          borderWidth: 1,
+        }],
       },
       options: {
         responsive: true,
-        maintainAspectRatio: true,
         plugins: { legend: { labels: { color: '#8b8fa3', font: { size: 11 } } } },
         scales: {
-          x: { stacked: true, ticks: { color: '#5a5e72' }, grid: { color: '#2a2f42' } },
-          y: { stacked: true, ticks: { color: '#5a5e72' }, grid: { color: '#2a2f42' } },
+          x: { ticks: { color: '#5a5e72' }, grid: { color: '#2a2f42' } },
+          y: { ticks: { color: '#5a5e72' }, grid: { color: '#2a2f42' }, beginAtZero: true },
         },
       },
     });
   },
 
-  renderTopDaysChart(data) {
-    const ctx = document.getElementById('chart-top-days');
-    if (this.charts.topDays) this.charts.topDays.destroy();
+  renderAgentBarsChart(data) {
+    const ctx = document.getElementById('chart-agent-bars');
+    if (this.charts.agentBars) this.charts.agentBars.destroy();
 
-    this.charts.topDays = new Chart(ctx, {
+    const agents = data.agents || [];
+    if (agents.length === 0) return;
+
+    const colors = ['#6366f1', '#22c55e', '#eab308', '#ef4444', '#ec4899', '#06b6d4', '#f97316'];
+
+    this.charts.agentBars = new Chart(ctx, {
       type: 'bar',
       data: {
-        labels: data.topDays.map(d => d.date),
+        labels: agents.map(a => a.agent_name || a.agent_id),
         datasets: [{
-          label: 'Wiadomości',
-          data: data.topDays.map(d => d.count),
-          backgroundColor: '#6366f199',
-          borderColor: '#6366f1',
+          label: 'Zapytania',
+          data: agents.map(a => a.user_messages),
+          backgroundColor: agents.map((_, i) => colors[i % colors.length] + '99'),
+          borderColor: agents.map((_, i) => colors[i % colors.length]),
           borderWidth: 1,
         }],
       },
@@ -497,7 +545,7 @@ const app = {
   refresh() {
     this.countdown = 60;
     switch (this.currentView) {
-      case 'overview': this.loadOverview(); break;
+      case 'overview': this.loadMonthlyOverview(); break;
       case 'agent': if (this.currentAgent) this.loadAgent(this.currentAgent); break;
       case 'compare': this.loadCompare(); break;
       case 'sessions': if (this.currentAgent) this.loadSessions(this.currentAgent); break;
