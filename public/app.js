@@ -40,6 +40,7 @@ const app = {
       case 'overview': this.loadOverview(); break;
       case 'agent': this.loadAgent(params.agentId); break;
       case 'compare': this.loadCompare(); break;
+      case 'analysis': this.loadAnalysis(); break;
       case 'sessions': this.loadSessions(params.agentId); break;
       case 'session-detail': this.loadSessionDetail(params.agentId, params.sessionId); break;
     }
@@ -529,6 +530,265 @@ const app = {
     loginScreen.style.display = 'none';
     appEl.style.display = '';
     return true;
+  },
+
+  // --- Analysis ---
+  async loadAnalysis() {
+    this.checkOllamaStatus();
+    // Show cached report if available
+    const el = document.getElementById('analysis-details');
+    if (!this.analysisReport) {
+      el.innerHTML = '<div class="empty-state">Kliknij "Generuj raport" aby przeanalizować rozmowy za pomocą AI</div>';
+    }
+  },
+
+  async checkOllamaStatus() {
+    try {
+      const status = await this.api('/analysis/status');
+      const badge = document.getElementById('ollama-status');
+      if (status.online && status.modelAvailable) {
+        badge.textContent = `● ${status.model}`;
+        badge.className = 'ollama-badge online';
+      } else if (status.online) {
+        badge.textContent = `⚠ Model ${status.model} niedostępny`;
+        badge.className = 'ollama-badge offline';
+      } else {
+        badge.textContent = '● Ollama offline';
+        badge.className = 'ollama-badge offline';
+      }
+    } catch {
+      const badge = document.getElementById('ollama-status');
+      badge.textContent = '● Błąd połączenia';
+      badge.className = 'ollama-badge offline';
+    }
+  },
+
+  async generateReport() {
+    const statusBar = document.getElementById('analysis-status-bar');
+    const progressText = document.getElementById('analysis-progress-text');
+    const progressBar = document.getElementById('analysis-progress-bar');
+    const overview = document.getElementById('analysis-overview');
+
+    statusBar.style.display = 'block';
+    overview.style.display = 'none';
+    progressText.textContent = 'Analizuję rozmowy... To może potrwać kilka minut.';
+    progressBar.style.width = '10%';
+
+    // Animate progress bar
+    let progress = 10;
+    const interval = setInterval(() => {
+      progress = Math.min(progress + Math.random() * 5, 90);
+      progressBar.style.width = progress + '%';
+    }, 3000);
+
+    try {
+      const report = await this.api('/analysis/report?limit=3&force=1');
+      clearInterval(interval);
+      progressBar.style.width = '100%';
+      progressText.textContent = 'Analiza zakończona!';
+
+      this.analysisReport = report;
+      setTimeout(() => {
+        statusBar.style.display = 'none';
+        this.renderAnalysisReport(report);
+      }, 800);
+    } catch (e) {
+      clearInterval(interval);
+      progressText.textContent = 'Błąd: ' + e.message;
+      progressBar.style.width = '0%';
+    }
+  },
+
+  renderAnalysisReport(report) {
+    const overview = document.getElementById('analysis-overview');
+    overview.style.display = 'block';
+
+    // Stats
+    const totalSessions = report.agents.reduce((s, a) => s + a.sessionsAnalyzed, 0);
+    const avgQuality = report.agents.filter(a => a.avgAgentQuality).length > 0
+      ? (report.agents.reduce((s, a) => s + (a.avgAgentQuality || 0), 0) / report.agents.filter(a => a.avgAgentQuality).length).toFixed(1)
+      : '-';
+    const totalIssues = report.agents.reduce((s, a) => s + (a.issues || []).length, 0);
+    const totalEscalations = report.agents.reduce((s, a) => s + a.escalationsNeeded, 0);
+
+    document.getElementById('analysis-stats').innerHTML = `
+      <div class="stat-card">
+        <div class="stat-value">${totalSessions}</div>
+        <div class="stat-label">Sesji przeanalizowanych</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">${avgQuality}</div>
+        <div class="stat-label">Śr. jakość agenta</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">${totalIssues}</div>
+        <div class="stat-label">Wykrytych problemów</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" style="${totalEscalations > 0 ? 'color:#f87171' : ''}">${totalEscalations}</div>
+        <div class="stat-label">Wymaga eskalacji</div>
+      </div>
+    `;
+
+    // Agent quality chart
+    this.renderAgentQualityChart(report);
+
+    // Topics
+    const allTopics = {};
+    for (const agent of report.agents) {
+      for (const t of (agent.topTopics || [])) {
+        allTopics[t.topic] = (allTopics[t.topic] || 0) + t.count;
+      }
+    }
+    const sortedTopics = Object.entries(allTopics).sort((a, b) => b[1] - a[1]).slice(0, 10);
+    document.getElementById('analysis-topics').innerHTML = sortedTopics.length > 0
+      ? '<div class="analysis-topics-list">' + sortedTopics.map(([t, c]) =>
+        `<span class="topic-tag">${this.escapeHtml(t)} (${c})</span>`
+      ).join('') + '</div>'
+      : '<div class="empty-state" style="padding:20px">Brak danych</div>';
+
+    // Issues
+    const allIssues = report.agents.flatMap(a => (a.issues || []).map(i => ({
+      ...i,
+      agentName: a.agentName,
+    })));
+    document.getElementById('analysis-issues').innerHTML = allIssues.length > 0
+      ? allIssues.map(i => `
+        <div style="padding:8px 0; border-bottom:1px solid var(--border); font-size:13px;">
+          <span style="color:var(--red)">⚠</span>
+          <strong>${this.escapeHtml(i.agentName)}</strong>:
+          ${this.escapeHtml(i.issue)}
+        </div>
+      `).join('')
+      : '<div class="empty-state" style="padding:20px">Brak problemów 🎉</div>';
+
+    // Detailed per-agent cards
+    const details = document.getElementById('analysis-details');
+    details.innerHTML = '<h3 style="margin-bottom:16px; color:var(--text-muted); font-size:12px; text-transform:uppercase; letter-spacing:1px;">Szczegóły per agent</h3>';
+
+    for (const agent of report.agents) {
+      for (const session of (agent.sessions || [])) {
+        if (session.error) continue;
+
+        const qualityClass = session.agentQuality >= 7 ? '' : session.agentQuality >= 5 ? 'mid' : 'low';
+        const sentimentClass = session.sentiment === 'negative' ? 'negative' : '';
+        const scoreDots = this.renderScoreDots(session.agentQuality || 0);
+
+        details.innerHTML += `
+          <div class="analysis-card">
+            <div class="analysis-card-header">
+              <h4>${this.escapeHtml(agent.agentName)} — sesja ${session.sessionId.substring(0, 8)}...</h4>
+              <div class="analysis-badges">
+                <span class="badge badge-quality ${qualityClass}">Jakość: ${session.agentQuality}/10</span>
+                <span class="badge badge-sentiment ${sentimentClass}">${this.sentimentLabel(session.sentiment)}</span>
+                ${session.taskCompleted ? '<span class="badge badge-quality">✓ Zadanie ukończone</span>' : '<span class="badge badge-quality low">✗ Nieukończone</span>'}
+                ${session.escalationNeeded ? '<span class="badge badge-escalation">⚠ Eskalacja!</span>' : ''}
+              </div>
+            </div>
+            <div class="analysis-summary">${this.escapeHtml(session.summary || '')}</div>
+            <div class="analysis-topics-list" style="margin-bottom:8px;">
+              ${(session.topics || []).map(t => `<span class="topic-tag">${this.escapeHtml(t)}</span>`).join('')}
+            </div>
+            ${session.keyInsights && session.keyInsights.length > 0 ? `
+              <div class="analysis-insights">
+                <ul>${session.keyInsights.map(i => `<li>${this.escapeHtml(i)}</li>`).join('')}</ul>
+              </div>
+            ` : ''}
+            ${session.agentQualityReason ? `<div style="margin-top:8px; font-size:12px; color:var(--text-muted);">💡 ${this.escapeHtml(session.agentQualityReason)}</div>` : ''}
+            <div style="margin-top:8px; font-size:11px; color:var(--text-muted); font-family:'Fira Code',monospace;">
+              ${session.messageCount || '?'} wiadomości · ${session.processingTime ? (session.processingTime / 1000).toFixed(1) + 's' : '?'}
+            </div>
+          </div>
+        `;
+      }
+    }
+  },
+
+  renderAgentQualityChart(report) {
+    const ctx = document.getElementById('chart-agent-quality');
+    if (this.charts.agentQuality) this.charts.agentQuality.destroy();
+
+    const agents = report.agents.filter(a => a.avgAgentQuality !== null);
+    if (agents.length === 0) return;
+
+    this.charts.agentQuality = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: agents.map(a => a.agentName),
+        datasets: [
+          {
+            label: 'Jakość agenta',
+            data: agents.map(a => a.avgAgentQuality),
+            backgroundColor: agents.map(a =>
+              a.avgAgentQuality >= 7 ? '#22c55e99' : a.avgAgentQuality >= 5 ? '#eab30899' : '#ef444499'
+            ),
+            borderColor: agents.map(a =>
+              a.avgAgentQuality >= 7 ? '#22c55e' : a.avgAgentQuality >= 5 ? '#eab308' : '#ef4444'
+            ),
+            borderWidth: 1,
+          },
+          {
+            label: 'Sentiment',
+            data: agents.map(a => (a.avgSentimentScore || 0) * 10),
+            backgroundColor: '#3b82f699',
+            borderColor: '#3b82f6',
+            borderWidth: 1,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { labels: { color: '#8b8fa3', font: { size: 11 } } } },
+        scales: {
+          x: { ticks: { color: '#5a5e72' }, grid: { color: '#2a2f42' } },
+          y: { min: 0, max: 10, ticks: { color: '#5a5e72' }, grid: { color: '#2a2f42' } },
+        },
+      },
+    });
+  },
+
+  renderScoreDots(score) {
+    let html = '<div class="score-dots">';
+    for (let i = 1; i <= 10; i++) {
+      const filled = i <= score;
+      const cls = filled ? (score >= 7 ? 'filled' : score >= 5 ? 'filled mid' : 'filled low') : '';
+      html += `<div class="score-dot ${cls}"></div>`;
+    }
+    return html + '</div>';
+  },
+
+  sentimentLabel(s) {
+    switch (s) {
+      case 'positive': return '😊 Pozytywny';
+      case 'negative': return '😞 Negatywny';
+      default: return '😐 Neutralny';
+    }
+  },
+
+  async analyzeCurrentSession() {
+    if (!this.currentAgent) return;
+    // Get current session from detail view
+    const title = document.getElementById('session-detail-title').textContent;
+    const sessionId = title.replace('Sesja: ', '');
+    if (!sessionId) return;
+
+    try {
+      const analysis = await this.api(`/agents/${this.currentAgent}/sessions/${sessionId}/analyze`, {
+        method: 'POST',
+      });
+      alert(JSON.stringify(analysis, null, 2));
+    } catch (e) {
+      alert('Błąd: ' + e.message);
+    }
+  },
+
+  // Override api to support POST
+  async apiPost(endpoint) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (this.token) headers['Authorization'] = 'Bearer ' + this.token;
+    const res = await fetch(`/api${endpoint}`, { method: 'POST', headers });
+    if (res.status === 401) { this.logout(); throw new Error('Unauthorized'); }
+    return res.json();
   },
 
   // --- Init ---

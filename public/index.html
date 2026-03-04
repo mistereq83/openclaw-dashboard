@@ -34,6 +34,9 @@
         <a href="#" class="nav-item" data-view="compare">
           <span class="nav-icon">&#9638;</span> Porównanie
         </a>
+        <a href="#" class="nav-item" data-view="analysis">
+          <span class="nav-icon">&#9881;</span> Analiza AI
+        </a>
         <div class="nav-divider">Agenci</div>
         <div id="agent-nav"></div>
       </nav>
@@ -175,6 +178,46 @@
           <button class="btn" onclick="app.searchInSessions()">Szukaj</button>
         </div>
         <div id="sessions-list" class="sessions-list"></div>
+      </div>
+
+      <!-- Analysis View -->
+      <div id="view-analysis" class="view">
+        <div class="page-header">
+          <h2>Analiza AI</h2>
+          <div class="header-actions">
+            <span id="ollama-status" class="ollama-badge">Sprawdzam...</span>
+            <button class="btn btn-sm" onclick="app.generateReport()">&#x26A1; Generuj raport</button>
+          </div>
+        </div>
+
+        <div id="analysis-status-bar" class="analysis-status-bar" style="display:none;">
+          <div class="analysis-progress">
+            <span id="analysis-progress-text">Analizuję...</span>
+            <div class="progress-bar"><div id="analysis-progress-bar" class="progress-fill"></div></div>
+          </div>
+        </div>
+
+        <div id="analysis-overview" style="display:none;">
+          <div class="stats-grid" id="analysis-stats"></div>
+
+          <div class="chart-card" style="margin-bottom:20px;">
+            <h3>Jakość agentów</h3>
+            <canvas id="chart-agent-quality"></canvas>
+          </div>
+
+          <div class="charts-row">
+            <div class="chart-card">
+              <h3>Najczęstsze tematy</h3>
+              <div id="analysis-topics"></div>
+            </div>
+            <div class="chart-card">
+              <h3>Wykryte problemy</h3>
+              <div id="analysis-issues"></div>
+            </div>
+          </div>
+        </div>
+
+        <div id="analysis-details" style="margin-top:20px;"></div>
       </div>
 
       <!-- Session Detail View -->

@@ -21,6 +21,7 @@ loadEnv();
 
 const { getAgentDisplayName, AGENT_DISPLAY_NAMES, listSessions, getSessionMessages, searchSessions } = require('./lib/parser');
 const { getAgentStats, getOverviewStats, generateCsvExport } = require('./lib/stats');
+const { analyzeSession, analyzeBatch, checkOllamaStatus, OLLAMA_MODEL } = require('./lib/ollama');
 const cache = require('./lib/cache');
 
 const app = express();
@@ -153,6 +154,131 @@ app.get('/api/stats/export', (req, res) => {
   res.setHeader('Content-Disposition', `attachment; filename="${agentId}-stats.csv"`);
   res.send(csv);
 });
+
+// --- AI Analysis Routes ---
+
+// GET /api/analysis/status — check Ollama connectivity
+app.get('/api/analysis/status', async (req, res) => {
+  const status = await checkOllamaStatus();
+  res.json(status);
+});
+
+// POST /api/agents/:name/sessions/:id/analyze — analyze single session
+app.post('/api/agents/:name/sessions/:id/analyze', async (req, res) => {
+  const agentId = req.params.name;
+  const sessionId = req.params.id;
+  if (!AGENT_IDS.includes(agentId)) {
+    return res.status(404).json({ error: 'Agent not found' });
+  }
+
+  // Check cache first
+  const cacheKey = `analysis-${agentId}-${sessionId}`;
+  const cached = cache.get(cacheKey);
+  if (cached && !req.query.force) {
+    return res.json({ ...cached, cached: true });
+  }
+
+  const messages = getSessionMessages(STATE_DIR, agentId, sessionId);
+  if (messages.length === 0) {
+    return res.json({ error: 'Brak wiadomości w sesji' });
+  }
+
+  const analysis = await analyzeSession(messages);
+
+  if (!analysis.error) {
+    cache.set(cacheKey, analysis);
+  }
+
+  res.json(analysis);
+});
+
+// POST /api/agents/:name/analyze-recent — analyze last N sessions for agent
+app.post('/api/agents/:name/analyze-recent', async (req, res) => {
+  const agentId = req.params.name;
+  if (!AGENT_IDS.includes(agentId)) {
+    return res.status(404).json({ error: 'Agent not found' });
+  }
+
+  const limit = Math.min(parseInt(req.query.limit || '5', 10), 20);
+  const sessions = listSessions(STATE_DIR, agentId).slice(0, limit);
+
+  const sessionsWithMessages = sessions
+    .map(s => ({
+      sessionId: s.id,
+      agentId,
+      messages: getSessionMessages(STATE_DIR, agentId, s.id),
+    }))
+    .filter(s => s.messages.length > 0);
+
+  const results = await analyzeBatch(sessionsWithMessages);
+  res.json({
+    agentId,
+    agentName: getAgentDisplayName(agentId),
+    model: OLLAMA_MODEL,
+    analyzedAt: new Date().toISOString(),
+    sessions: results,
+  });
+});
+
+// GET /api/analysis/report — aggregate analysis report across all agents
+app.get('/api/analysis/report', async (req, res) => {
+  const cacheKey = 'analysis-report';
+  const cached = cache.get(cacheKey);
+  if (cached && !req.query.force) {
+    return res.json({ ...cached, cached: true });
+  }
+
+  const limit = Math.min(parseInt(req.query.limit || '3', 10), 10);
+  const report = { agents: [], generatedAt: new Date().toISOString(), model: OLLAMA_MODEL };
+
+  for (const agentId of AGENT_IDS) {
+    const sessions = listSessions(STATE_DIR, agentId).slice(0, limit);
+    const results = [];
+
+    for (const session of sessions) {
+      const messages = getSessionMessages(STATE_DIR, agentId, session.id);
+      if (messages.length === 0) continue;
+      const analysis = await analyzeSession(messages);
+      results.push({ sessionId: session.id, ...analysis });
+    }
+
+    const validResults = results.filter(r => !r.error);
+    const avgQuality = validResults.length > 0
+      ? Math.round((validResults.reduce((sum, r) => sum + (r.agentQuality || 0), 0) / validResults.length) * 10) / 10
+      : null;
+    const avgSentiment = validResults.length > 0
+      ? Math.round((validResults.reduce((sum, r) => sum + (r.sentimentScore || 0), 0) / validResults.length) * 100) / 100
+      : null;
+
+    report.agents.push({
+      agentId,
+      agentName: getAgentDisplayName(agentId),
+      sessionsAnalyzed: results.length,
+      avgAgentQuality: avgQuality,
+      avgSentimentScore: avgSentiment,
+      issues: validResults.flatMap(r => (r.issues || []).map(i => ({ session: r.sessionId, issue: i }))),
+      escalationsNeeded: validResults.filter(r => r.escalationNeeded).length,
+      topTopics: getTopTopics(validResults),
+      sessions: results,
+    });
+  }
+
+  cache.set(cacheKey, report);
+  res.json(report);
+});
+
+function getTopTopics(analyses) {
+  const counts = {};
+  for (const a of analyses) {
+    for (const topic of (a.topics || [])) {
+      counts[topic] = (counts[topic] || 0) + 1;
+    }
+  }
+  return Object.entries(counts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10)
+    .map(([topic, count]) => ({ topic, count }));
+}
 
 // Debug: raw cost check
 app.get('/api/debug/cost/:agentId/:sessionId', (req, res) => {
