@@ -735,3 +735,8 @@ tr:hover td { background: rgba(34, 197, 94, 0.04); }
 .score-dot.filled { background: var(--accent); }
 .score-dot.filled.mid { background: var(--yellow); }
 .score-dot.filled.low { background: var(--red); }
+
+@keyframes fadeSlideIn {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}

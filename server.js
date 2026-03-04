@@ -220,7 +220,7 @@ app.post('/api/agents/:name/analyze-recent', async (req, res) => {
   });
 });
 
-// GET /api/analysis/report — aggregate analysis report across all agents
+// GET /api/analysis/report — aggregate analysis report (legacy, non-streaming)
 app.get('/api/analysis/report', async (req, res) => {
   const cacheKey = 'analysis-report';
   const cached = cache.get(cacheKey);
@@ -265,6 +265,121 @@ app.get('/api/analysis/report', async (req, res) => {
 
   cache.set(cacheKey, report);
   res.json(report);
+});
+
+// GET /api/analysis/stream — SSE streaming analysis (real-time progress)
+app.get('/api/analysis/stream', (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit || '3', 10), 10);
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+
+  const send = (event, data) => {
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
+
+  // Build work plan
+  const plan = [];
+  for (const agentId of AGENT_IDS) {
+    const sessions = listSessions(STATE_DIR, agentId).slice(0, limit);
+    const sessionsWithMessages = sessions
+      .map(s => ({ session: s, messages: getSessionMessages(STATE_DIR, agentId, s.id) }))
+      .filter(s => s.messages.length > 0);
+    plan.push({ agentId, agentName: getAgentDisplayName(agentId), sessions: sessionsWithMessages });
+  }
+
+  const totalSessions = plan.reduce((s, p) => s + p.sessions.length, 0);
+  send('init', { totalAgents: plan.length, totalSessions, model: OLLAMA_MODEL });
+
+  let closed = false;
+  req.on('close', () => { closed = true; });
+
+  (async () => {
+    let sessionsDone = 0;
+    const allAgentResults = [];
+
+    for (let ai = 0; ai < plan.length; ai++) {
+      if (closed) return;
+      const { agentId, agentName, sessions } = plan[ai];
+
+      send('agent-start', {
+        agentId,
+        agentName,
+        agentIndex: ai + 1,
+        totalAgents: plan.length,
+        sessionsCount: sessions.length,
+      });
+
+      const agentResults = [];
+
+      for (let si = 0; si < sessions.length; si++) {
+        if (closed) return;
+        const { session, messages } = sessions[si];
+
+        send('session-start', {
+          agentId,
+          agentName,
+          sessionId: session.id,
+          sessionIndex: si + 1,
+          sessionsCount: sessions.length,
+          messageCount: messages.length,
+          progress: Math.round((sessionsDone / Math.max(totalSessions, 1)) * 100),
+        });
+
+        const analysis = await analyzeSession(messages);
+        sessionsDone++;
+
+        const result = { sessionId: session.id, agentId, agentName, ...analysis };
+        agentResults.push(result);
+
+        send('session-done', {
+          ...result,
+          progress: Math.round((sessionsDone / Math.max(totalSessions, 1)) * 100),
+        });
+      }
+
+      // Compute agent aggregates
+      const validResults = agentResults.filter(r => !r.error);
+      const avgQuality = validResults.length > 0
+        ? Math.round((validResults.reduce((sum, r) => sum + (r.agentQuality || 0), 0) / validResults.length) * 10) / 10
+        : null;
+      const avgSentiment = validResults.length > 0
+        ? Math.round((validResults.reduce((sum, r) => sum + (r.sentimentScore || 0), 0) / validResults.length) * 100) / 100
+        : null;
+
+      const agentSummary = {
+        agentId,
+        agentName,
+        sessionsAnalyzed: agentResults.length,
+        avgAgentQuality: avgQuality,
+        avgSentimentScore: avgSentiment,
+        issues: validResults.flatMap(r => (r.issues || []).map(i => ({ session: r.sessionId, issue: i }))),
+        escalationsNeeded: validResults.filter(r => r.escalationNeeded).length,
+        topTopics: getTopTopics(validResults),
+        sessions: agentResults,
+      };
+
+      allAgentResults.push(agentSummary);
+      send('agent-done', agentSummary);
+    }
+
+    send('complete', {
+      agents: allAgentResults,
+      generatedAt: new Date().toISOString(),
+      model: OLLAMA_MODEL,
+    });
+
+    res.end();
+  })().catch(err => {
+    if (!closed) {
+      send('error', { message: err.message });
+      res.end();
+    }
+  });
 });
 
 function getTopTopics(analyses) {

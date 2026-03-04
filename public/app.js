@@ -568,35 +568,131 @@ const app = {
     const progressText = document.getElementById('analysis-progress-text');
     const progressBar = document.getElementById('analysis-progress-bar');
     const overview = document.getElementById('analysis-overview');
+    const details = document.getElementById('analysis-details');
 
     statusBar.style.display = 'block';
     overview.style.display = 'none';
-    progressText.textContent = 'Analizuję rozmowy... To może potrwać kilka minut.';
-    progressBar.style.width = '10%';
+    details.innerHTML = '<h3 style="margin-bottom:16px; color:var(--text-muted); font-size:12px; text-transform:uppercase; letter-spacing:1px;">Wyniki na żywo</h3>';
+    progressText.textContent = 'Łączę z Ollama...';
+    progressBar.style.width = '2%';
 
-    // Animate progress bar
-    let progress = 10;
-    const interval = setInterval(() => {
-      progress = Math.min(progress + Math.random() * 5, 90);
-      progressBar.style.width = progress + '%';
-    }, 3000);
+    const tokenParam = this.token ? `&token=${encodeURIComponent(this.token)}` : '';
+    const es = new EventSource(`/api/analysis/stream?limit=3${tokenParam}`);
 
-    try {
-      const report = await this.api('/analysis/report?limit=3&force=1');
-      clearInterval(interval);
-      progressBar.style.width = '100%';
-      progressText.textContent = 'Analiza zakończona!';
+    this.streamResults = { agents: [], model: '' };
 
+    es.addEventListener('init', (e) => {
+      const data = JSON.parse(e.data);
+      this.streamResults.model = data.model;
+      progressText.textContent = `Znaleziono ${data.totalSessions} sesji do analizy (${data.totalAgents} agentów) — model: ${data.model}`;
+      progressBar.style.width = '5%';
+    });
+
+    es.addEventListener('agent-start', (e) => {
+      const data = JSON.parse(e.data);
+      const sessionsInfo = data.sessionsCount > 0 ? `${data.sessionsCount} sesji` : 'brak sesji';
+      progressText.textContent = `🔍 ${data.agentName} (${data.agentIndex}/${data.totalAgents}) — ${sessionsInfo}...`;
+    });
+
+    es.addEventListener('session-start', (e) => {
+      const data = JSON.parse(e.data);
+      progressText.textContent = `🔍 ${data.agentName} — sesja ${data.sessionIndex}/${data.sessionsCount} (${data.messageCount} wiadomości)...`;
+      progressBar.style.width = data.progress + '%';
+    });
+
+    es.addEventListener('session-done', (e) => {
+      const data = JSON.parse(e.data);
+      progressBar.style.width = data.progress + '%';
+
+      if (!data.error) {
+        progressText.textContent = `✅ ${data.agentName} — sesja gotowa (jakość: ${data.agentQuality}/10)`;
+        this.appendSessionCard(data, details);
+      } else {
+        progressText.textContent = `⚠️ ${data.agentName} — ${data.error}`;
+        this.appendErrorCard(data, details);
+      }
+    });
+
+    es.addEventListener('agent-done', (e) => {
+      const data = JSON.parse(e.data);
+      this.streamResults.agents.push(data);
+    });
+
+    es.addEventListener('complete', (e) => {
+      const report = JSON.parse(e.data);
+      es.close();
       this.analysisReport = report;
+      progressBar.style.width = '100%';
+      progressText.textContent = '✅ Analiza zakończona!';
       setTimeout(() => {
         statusBar.style.display = 'none';
         this.renderAnalysisReport(report);
-      }, 800);
-    } catch (e) {
-      clearInterval(interval);
-      progressText.textContent = 'Błąd: ' + e.message;
-      progressBar.style.width = '0%';
-    }
+      }, 1500);
+    });
+
+    es.addEventListener('error', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        progressText.textContent = '❌ Błąd: ' + data.message;
+      } catch {
+        progressText.textContent = '❌ Połączenie przerwane';
+      }
+      es.close();
+    });
+
+    es.onerror = () => {
+      if (es.readyState === EventSource.CLOSED) return;
+      progressText.textContent = '❌ Połączenie z serwerem przerwane';
+      es.close();
+    };
+  },
+
+  appendSessionCard(data, container) {
+    const qualityClass = data.agentQuality >= 7 ? '' : data.agentQuality >= 5 ? 'mid' : 'low';
+    const sentimentClass = data.sentiment === 'negative' ? 'negative' : '';
+
+    const card = document.createElement('div');
+    card.className = 'analysis-card';
+    card.style.animation = 'fadeSlideIn 0.4s ease';
+    card.innerHTML = `
+      <div class="analysis-card-header">
+        <h4>${this.escapeHtml(data.agentName)} — sesja ${data.sessionId.substring(0, 8)}...</h4>
+        <div class="analysis-badges">
+          <span class="badge badge-quality ${qualityClass}">Jakość: ${data.agentQuality}/10</span>
+          <span class="badge badge-sentiment ${sentimentClass}">${this.sentimentLabel(data.sentiment)}</span>
+          ${data.taskCompleted ? '<span class="badge badge-quality">✓ Ukończone</span>' : '<span class="badge badge-quality low">✗ Nieukończone</span>'}
+          ${data.escalationNeeded ? '<span class="badge badge-escalation">⚠ Eskalacja!</span>' : ''}
+        </div>
+      </div>
+      <div class="analysis-summary">${this.escapeHtml(data.summary || '')}</div>
+      <div class="analysis-topics-list" style="margin-bottom:8px;">
+        ${(data.topics || []).map(t => `<span class="topic-tag">${this.escapeHtml(t)}</span>`).join('')}
+      </div>
+      ${data.keyInsights && data.keyInsights.length > 0 ? `
+        <div class="analysis-insights">
+          <ul>${data.keyInsights.map(i => `<li>${this.escapeHtml(i)}</li>`).join('')}</ul>
+        </div>
+      ` : ''}
+      ${data.agentQualityReason ? `<div style="margin-top:8px; font-size:12px; color:var(--text-muted);">💡 ${this.escapeHtml(data.agentQualityReason)}</div>` : ''}
+      <div style="margin-top:8px; font-size:11px; color:var(--text-muted); font-family:'Fira Code',monospace;">
+        ${data.messageCount || '?'} wiadomości · ${data.processingTime ? (data.processingTime / 1000).toFixed(1) + 's' : '?'}
+      </div>
+    `;
+    container.appendChild(card);
+  },
+
+  appendErrorCard(data, container) {
+    const card = document.createElement('div');
+    card.className = 'analysis-card';
+    card.style.borderColor = 'rgba(239, 68, 68, 0.3)';
+    card.innerHTML = `
+      <div class="analysis-card-header">
+        <h4>${this.escapeHtml(data.agentName)} — sesja ${data.sessionId.substring(0, 8)}...</h4>
+        <span class="badge badge-quality low">❌ Błąd</span>
+      </div>
+      <div class="analysis-summary" style="color:#f87171;">${this.escapeHtml(data.error)}</div>
+    `;
+    container.appendChild(card);
   },
 
   renderAnalysisReport(report) {
