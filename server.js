@@ -26,6 +26,7 @@ const { runDailyAnalysis, loadReport, listAvailableDays, getTrend } = require('.
 const scheduler = require('./lib/scheduler');
 const db = require('./lib/db');
 const { backfillStats, computeRecent } = require('./lib/stats-worker');
+const archiveWorker = require('./lib/archive-worker');
 const cache = require('./lib/cache');
 
 const app = express();
@@ -306,6 +307,26 @@ app.get('/api/debug/cost/:agentId/:sessionId', (req, res) => {
   res.json({ filePath, linesTotal: lines.length, costLines: results, total });
 });
 
+// GET /api/archive/status — archive stats + last run info
+app.get('/api/archive/status', (req, res) => {
+  try {
+    const status = archiveWorker.getStatus(STATE_DIR, AGENT_IDS);
+    res.json(status);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/archive/run — manual trigger
+app.post('/api/archive/run', (req, res) => {
+  try {
+    const stats = archiveWorker.runArchive(STATE_DIR, AGENT_IDS);
+    res.json({ ok: true, stats });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // SPA fallback
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
@@ -322,6 +343,14 @@ app.listen(PORT, () => {
     console.log('Historical stats backfilled into SQLite');
   } catch (err) {
     console.error('Backfill error:', err.message);
+  }
+
+  // Start message archival worker (run now + every 5 min)
+  try {
+    archiveWorker.start(STATE_DIR, AGENT_IDS);
+    console.log('Archive worker started');
+  } catch (err) {
+    console.error('Archive worker error:', err.message);
   }
 
   // Start nightly analysis scheduler
