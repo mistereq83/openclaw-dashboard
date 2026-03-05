@@ -164,10 +164,32 @@ app.get('/api/stats/monthly', (req, res) => {
   // Group timeline by date for chart
   const dailyTotals = db.getDailyTimeline(month);
 
+  // Cost: compute from live JSONL via getAgentStats (single source of truth)
+  // SQLite cost is unreliable due to timezone/assignment issues
+  const liveAgentIds = agentFilter ? [agentFilter] : AGENT_IDS;
+  let liveCost = 0;
+  const agentsWithCost = [];
+  for (const aid of liveAgentIds) {
+    const agentStats = getAgentStats(STATE_DIR, aid, month);
+    liveCost += agentStats.totalCost || 0;
+    agentsWithCost.push({ agent_id: aid, liveCost: agentStats.totalCost || 0 });
+  }
+
+  // Override SQLite cost with live cost
+  const fixedTotals = totals
+    ? { ...totals, cost: Math.round(liveCost * 10000) / 10000 }
+    : { agents: 0, sessions: 0, messages: 0, user_messages: 0, cost: 0 };
+
+  // Also fix per-agent cost in agents array
+  const fixedAgents = (agents || []).map(a => {
+    const match = agentsWithCost.find(x => x.agent_id === a.agent_id);
+    return match ? { ...a, cost: Math.round(match.liveCost * 10000) / 10000 } : a;
+  });
+
   res.json({
     month,
-    totals: totals || { agents: 0, sessions: 0, messages: 0, user_messages: 0, cost: 0 },
-    agents,
+    totals: fixedTotals,
+    agents: fixedAgents,
     dailyTotals,
     timeline,
     availableMonths: months,
