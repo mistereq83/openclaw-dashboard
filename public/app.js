@@ -184,10 +184,17 @@ const app = {
   async loadAgent(agentId) {
     this.currentAgent = agentId;
     try {
-      const data = await this.api(`/agents/${agentId}`);
+      const data = await this.api(`/agents/${agentId}?month=${this.currentMonth}`);
       this.agentData = data;
 
       document.getElementById('agent-title').textContent = data.name;
+
+      // Month label
+      const monthLabelEl = document.getElementById('agent-month-label');
+      if (monthLabelEl) {
+        monthLabelEl.textContent = 'Dane za: ' + this.formatMonth(this.currentMonth);
+      }
+
       document.getElementById('agent-sessions-total').textContent = data.sessionsTotal;
       document.getElementById('agent-sessions-week').textContent = data.sessionsWeek;
       document.getElementById('agent-sessions-today').textContent = data.sessionsToday;
@@ -199,6 +206,10 @@ const app = {
       }
       if (document.getElementById('agent-total-cost-pln')) {
         document.getElementById('agent-total-cost-pln').textContent = (data.totalCostPLN || 0).toFixed(2) + ' PLN';
+      }
+      // All-time cost
+      if (document.getElementById('agent-alltime-cost')) {
+        document.getElementById('agent-alltime-cost').textContent = '$' + (data.allTimeCost || 0).toFixed(4);
       }
 
       this.renderTimeline(data);

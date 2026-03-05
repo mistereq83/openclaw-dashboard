@@ -73,19 +73,20 @@ app.get('/api/agents', (req, res) => {
   res.json(data);
 });
 
-// GET /api/agents/:name — detailed stats
+// GET /api/agents/:name — detailed stats (supports ?month=2026-03)
 app.get('/api/agents/:name', (req, res) => {
   const agentId = req.params.name;
   if (!AGENT_IDS.includes(agentId)) {
     return res.status(404).json({ error: 'Agent not found' });
   }
-  const cacheKey = `agent-stats-${agentId}`;
+  const month = req.query.month || null;
+  const cacheKey = `agent-stats-${agentId}-${month || 'all'}`;
   let data = cache.get(cacheKey);
   if (!data) {
     data = {
       id: agentId,
       name: getAgentDisplayName(agentId),
-      ...getAgentStats(STATE_DIR, agentId),
+      ...getAgentStats(STATE_DIR, agentId, month),
     };
     cache.set(cacheKey, data);
   }

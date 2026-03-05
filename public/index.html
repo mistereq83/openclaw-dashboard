@@ -103,7 +103,10 @@
       <!-- Agent Detail View -->
       <div id="view-agent" class="view">
         <div class="page-header">
-          <h2 id="agent-title">Agent</h2>
+          <div>
+            <h2 id="agent-title">Agent</h2>
+            <div id="agent-month-label" style="font-size:0.85rem;color:var(--text-muted);margin-top:2px;"></div>
+          </div>
           <div class="header-actions">
             <button class="btn btn-sm" onclick="app.exportCsv()">&#x2913; Eksport CSV</button>
             <button class="btn btn-sm" onclick="app.showSessions()">&#x1f4cb; Sesje</button>
@@ -136,7 +139,11 @@
           </div>
           <div class="stat-card">
             <div class="stat-value" id="agent-total-cost">-</div>
-            <div class="stat-label">Koszt łączny (USD)</div>
+            <div class="stat-label">Koszt miesięczny (USD)</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="agent-alltime-cost">-</div>
+            <div class="stat-label">Koszt all-time (USD)</div>
           </div>
         </div>
         <div class="charts-row">
