@@ -781,6 +781,95 @@ tr:hover td { background: rgba(34, 197, 94, 0.04); }
   border: 1px solid rgba(255,255,255,0.04);
 }
 
+.analysis-issues-block {
+  margin-top: 12px;
+  padding: 10px;
+  background: rgba(255,255,255,0.03);
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.06);
+}
+
+.analysis-issues-title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.issue-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.issue-row:last-child {
+  border-bottom: none;
+}
+
+.issue-badge {
+  font-family: 'Fira Code', monospace;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.12);
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.issue-firma {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.35);
+  color: #f87171;
+}
+
+.issue-prywatne {
+  background: rgba(234, 179, 8, 0.15);
+  border-color: rgba(234, 179, 8, 0.35);
+  color: #fbbf24;
+}
+
+.issue-bezpieczenstwo {
+  background: rgba(249, 115, 22, 0.15);
+  border-color: rgba(249, 115, 22, 0.35);
+  color: #fdba74;
+}
+
+.issue-ok {
+  font-size: 12px;
+  color: #22c55e;
+  padding: 6px 0;
+}
+
+.analysis-session-details {
+  margin-top: 12px;
+  padding-top: 6px;
+  border-top: 1px dashed rgba(255,255,255,0.08);
+}
+
+.analysis-session-details summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-muted);
+  list-style: none;
+}
+
+.analysis-session-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.analysis-session-list {
+  margin-top: 10px;
+}
+
+.analysis-card-compact {
+  border-color: rgba(255,255,255,0.06);
+}
+
 .analysis-insights li {
   font-size: 12px;
   color: var(--text-secondary);

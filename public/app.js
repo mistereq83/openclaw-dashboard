@@ -540,6 +540,75 @@ const app = {
     return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   },
 
+  qualityClass(score) {
+    if (score === null || score === undefined) return '';
+    if (score >= 7) return '';
+    if (score >= 5) return 'mid';
+    return 'low';
+  },
+
+  formatQuality(score) {
+    if (score === null || score === undefined) return '-';
+    return score;
+  },
+
+  issueBadge(category) {
+    switch (category) {
+      case 'FIRMA':
+        return '<span class="issue-badge issue-firma">🔴 FIRMA</span>';
+      case 'PRYWATNE':
+        return '<span class="issue-badge issue-prywatne">🟡 PRYWATNE</span>';
+      case 'BEZPIECZENSTWO':
+        return '<span class="issue-badge issue-bezpieczenstwo">🟠 BEZPIECZEŃSTWO</span>';
+      default:
+        return '<span class="issue-badge">⚪ INNE</span>';
+    }
+  },
+
+  renderFlaggedIssuesList(issues) {
+    if (!issues || issues.length === 0) {
+      return '<div class="issue-ok">Brak zagrożeń</div>';
+    }
+    return issues.map(i => `
+      <div class="issue-row">
+        ${this.issueBadge(i.category)}
+        <span>${this.escapeHtml(i.description || '')}</span>
+      </div>
+    `).join('');
+  },
+
+  buildSessionCard(agentName, session) {
+    if (session.error) return '';
+    const qualityClass = this.qualityClass(session.agentQuality);
+    const sentimentClass = session.sentiment === 'negative' ? 'negative' : '';
+    return `
+      <div class="analysis-card analysis-card-compact">
+        <div class="analysis-card-header">
+          <h4>${this.escapeHtml(agentName)} — sesja ${session.sessionId.substring(0, 8)}...</h4>
+          <div class="analysis-badges">
+            <span class="badge badge-quality ${qualityClass}">Jakość: ${this.formatQuality(session.agentQuality)}/10</span>
+            <span class="badge badge-sentiment ${sentimentClass}">${this.sentimentLabel(session.sentiment)}</span>
+            ${session.taskCompleted ? '<span class="badge badge-quality">✓ Zadanie ukończone</span>' : '<span class="badge badge-quality low">✗ Nieukończone</span>'}
+            ${session.escalationNeeded ? '<span class="badge badge-escalation">⚠ Eskalacja!</span>' : ''}
+          </div>
+        </div>
+        <div class="analysis-summary">${this.escapeHtml(session.summary || '')}</div>
+        <div class="analysis-topics-list" style="margin-bottom:8px;">
+          ${(session.topics || []).map(t => `<span class="topic-tag">${this.escapeHtml(t)}</span>`).join('')}
+        </div>
+        ${session.keyInsights && session.keyInsights.length > 0 ? `
+          <div class="analysis-insights">
+            <ul>${session.keyInsights.map(i => `<li>${this.escapeHtml(i)}</li>`).join('')}</ul>
+          </div>
+        ` : ''}
+        ${session.agentQualityReason ? `<div style="margin-top:8px; font-size:12px; color:var(--text-muted);">💡 ${this.escapeHtml(session.agentQualityReason)}</div>` : ''}
+        <div style="margin-top:8px; font-size:11px; color:var(--text-muted); font-family:'Fira Code',monospace;">
+          ${session.messageCount || '?'} wiadomości · ${session.processingTime ? (session.processingTime / 1000).toFixed(1) + 's' : '?'}
+        </div>
+      </div>
+    `;
+  },
+
   // --- Refresh ---
   startAutoRefresh() {
     this.countdown = 60;
@@ -829,12 +898,19 @@ const app = {
     const overview = document.getElementById('analysis-overview');
     overview.style.display = 'block';
 
+    const hasSynthesis = (report.agents || []).some(a => a.synthesis);
+
     // Stats
     const totalSessions = report.agents.reduce((s, a) => s + a.sessionsAnalyzed, 0);
-    const avgQuality = report.agents.filter(a => a.avgAgentQuality).length > 0
-      ? (report.agents.reduce((s, a) => s + (a.avgAgentQuality || 0), 0) / report.agents.filter(a => a.avgAgentQuality).length).toFixed(1)
+    const qualityValues = report.agents
+      .map(a => (a.synthesis && a.synthesis.overallQuality !== undefined) ? a.synthesis.overallQuality : a.avgAgentQuality)
+      .filter(v => v !== null && v !== undefined);
+    const avgQuality = qualityValues.length > 0
+      ? (qualityValues.reduce((s, v) => s + v, 0) / qualityValues.length).toFixed(1)
       : '-';
-    const totalIssues = report.agents.reduce((s, a) => s + (a.issues || []).length, 0);
+    const totalIssues = hasSynthesis
+      ? report.agents.reduce((s, a) => s + ((a.synthesis && a.synthesis.flaggedIssues) ? a.synthesis.flaggedIssues.length : 0), 0)
+      : report.agents.reduce((s, a) => s + (a.issues || []).length, 0);
     const totalEscalations = report.agents.reduce((s, a) => s + a.escalationsNeeded, 0);
 
     document.getElementById('analysis-stats').innerHTML = `
@@ -865,8 +941,14 @@ const app = {
     // Topics
     const allTopics = {};
     for (const agent of report.agents) {
-      for (const t of (agent.topTopics || [])) {
-        allTopics[t.topic] = (allTopics[t.topic] || 0) + t.count;
+      if (hasSynthesis && agent.synthesis && Array.isArray(agent.synthesis.mainTopics)) {
+        for (const topic of agent.synthesis.mainTopics) {
+          allTopics[topic] = (allTopics[topic] || 0) + 1;
+        }
+      } else {
+        for (const t of (agent.topTopics || [])) {
+          allTopics[t.topic] = (allTopics[t.topic] || 0) + t.count;
+        }
       }
     }
     const sortedTopics = Object.entries(allTopics).sort((a, b) => b[1] - a[1]).slice(0, 10);
@@ -877,58 +959,80 @@ const app = {
       : '<div class="empty-state" style="padding:20px">Brak danych</div>';
 
     // Issues
-    const allIssues = report.agents.flatMap(a => (a.issues || []).map(i => ({
-      ...i,
-      agentName: a.agentName,
-    })));
-    document.getElementById('analysis-issues').innerHTML = allIssues.length > 0
-      ? allIssues.map(i => `
-        <div style="padding:8px 0; border-bottom:1px solid var(--border); font-size:13px;">
-          <span style="color:var(--red)">⚠</span>
-          <strong>${this.escapeHtml(i.agentName)}</strong>:
-          ${this.escapeHtml(i.issue)}
-        </div>
-      `).join('')
-      : '<div class="empty-state" style="padding:20px">Brak problemów 🎉</div>';
+    const issuesEl = document.getElementById('analysis-issues');
+    if (hasSynthesis) {
+      const allIssues = report.agents.flatMap(a => (a.synthesis && a.synthesis.flaggedIssues) ? a.synthesis.flaggedIssues.map(i => ({
+        ...i,
+        agentName: a.agentName,
+      })) : []);
+      issuesEl.innerHTML = allIssues.length > 0
+        ? allIssues.map(i => `
+          <div class="issue-row">
+            ${this.issueBadge(i.category)}
+            <strong>${this.escapeHtml(i.agentName)}</strong>
+            <span>${this.escapeHtml(i.description || '')}</span>
+          </div>
+        `).join('')
+        : '<div class="issue-ok">Brak zagrożeń</div>';
+    } else {
+      const allIssues = report.agents.flatMap(a => (a.issues || []).map(i => ({
+        ...i,
+        agentName: a.agentName,
+      })));
+      issuesEl.innerHTML = allIssues.length > 0
+        ? allIssues.map(i => `
+          <div style="padding:8px 0; border-bottom:1px solid var(--border); font-size:13px;">
+            <span style="color:var(--red)">⚠</span>
+            <strong>${this.escapeHtml(i.agentName)}</strong>:
+            ${this.escapeHtml(i.issue)}
+          </div>
+        `).join('')
+        : '<div class="empty-state" style="padding:20px">Brak problemów 🎉</div>';
+    }
 
     // Detailed per-agent cards
     const details = document.getElementById('analysis-details');
     details.innerHTML = '<h3 style="margin-bottom:16px; color:var(--text-muted); font-size:12px; text-transform:uppercase; letter-spacing:1px;">Szczegóły per agent</h3>';
 
-    for (const agent of report.agents) {
-      for (const session of (agent.sessions || [])) {
-        if (session.error) continue;
-
-        const qualityClass = session.agentQuality >= 7 ? '' : session.agentQuality >= 5 ? 'mid' : 'low';
-        const sentimentClass = session.sentiment === 'negative' ? 'negative' : '';
-        const scoreDots = this.renderScoreDots(session.agentQuality || 0);
+    if (hasSynthesis) {
+      for (const agent of report.agents) {
+        const synthesis = agent.synthesis || {};
+        const quality = synthesis.overallQuality !== undefined ? synthesis.overallQuality : agent.avgAgentQuality;
+        const qualityClass = this.qualityClass(quality);
+        const topics = synthesis.mainTopics || [];
+        const flaggedIssues = synthesis.flaggedIssues || [];
+        const sessionsHtml = (agent.sessions || []).map(s => this.buildSessionCard(agent.agentName, s)).filter(Boolean).join('');
 
         details.innerHTML += `
           <div class="analysis-card">
             <div class="analysis-card-header">
-              <h4>${this.escapeHtml(agent.agentName)} — sesja ${session.sessionId.substring(0, 8)}...</h4>
+              <h4>${this.escapeHtml(agent.agentName)}</h4>
               <div class="analysis-badges">
-                <span class="badge badge-quality ${qualityClass}">Jakość: ${session.agentQuality}/10</span>
-                <span class="badge badge-sentiment ${sentimentClass}">${this.sentimentLabel(session.sentiment)}</span>
-                ${session.taskCompleted ? '<span class="badge badge-quality">✓ Zadanie ukończone</span>' : '<span class="badge badge-quality low">✗ Nieukończone</span>'}
-                ${session.escalationNeeded ? '<span class="badge badge-escalation">⚠ Eskalacja!</span>' : ''}
+                <span class="badge badge-quality ${qualityClass}">Jakość dnia: ${this.formatQuality(quality)}/10</span>
               </div>
             </div>
-            <div class="analysis-summary">${this.escapeHtml(session.summary || '')}</div>
+            <div class="analysis-summary">${this.escapeHtml(synthesis.daySummary || 'Brak syntezy dla tego dnia.')}</div>
             <div class="analysis-topics-list" style="margin-bottom:8px;">
-              ${(session.topics || []).map(t => `<span class="topic-tag">${this.escapeHtml(t)}</span>`).join('')}
+              ${topics.map(t => `<span class="topic-tag">${this.escapeHtml(t)}</span>`).join('')}
             </div>
-            ${session.keyInsights && session.keyInsights.length > 0 ? `
-              <div class="analysis-insights">
-                <ul>${session.keyInsights.map(i => `<li>${this.escapeHtml(i)}</li>`).join('')}</ul>
+            <div class="analysis-issues-block">
+              <div class="analysis-issues-title">Wykryte problemy</div>
+              ${this.renderFlaggedIssuesList(flaggedIssues)}
+            </div>
+            <details class="analysis-session-details">
+              <summary>Szczegóły sesji</summary>
+              <div class="analysis-session-list">
+                ${sessionsHtml || '<div class="empty-state" style="padding:12px">Brak sesji do wyświetlenia</div>'}
               </div>
-            ` : ''}
-            ${session.agentQualityReason ? `<div style="margin-top:8px; font-size:12px; color:var(--text-muted);">💡 ${this.escapeHtml(session.agentQualityReason)}</div>` : ''}
-            <div style="margin-top:8px; font-size:11px; color:var(--text-muted); font-family:'Fira Code',monospace;">
-              ${session.messageCount || '?'} wiadomości · ${session.processingTime ? (session.processingTime / 1000).toFixed(1) + 's' : '?'}
-            </div>
+            </details>
           </div>
         `;
+      }
+    } else {
+      for (const agent of report.agents) {
+        for (const session of (agent.sessions || [])) {
+          details.innerHTML += this.buildSessionCard(agent.agentName, session);
+        }
       }
     }
   },
@@ -937,8 +1041,15 @@ const app = {
     const ctx = document.getElementById('chart-agent-quality');
     if (this.charts.agentQuality) this.charts.agentQuality.destroy();
 
-    const agents = report.agents.filter(a => a.avgAgentQuality !== null);
+    const agents = report.agents.filter(a => {
+      if (a.synthesis && a.synthesis.overallQuality !== undefined && a.synthesis.overallQuality !== null) return true;
+      return a.avgAgentQuality !== null;
+    });
     if (agents.length === 0) return;
+
+    const qualityValues = agents.map(a =>
+      (a.synthesis && a.synthesis.overallQuality !== undefined) ? a.synthesis.overallQuality : a.avgAgentQuality
+    );
 
     this.charts.agentQuality = new Chart(ctx, {
       type: 'bar',
@@ -947,12 +1058,12 @@ const app = {
         datasets: [
           {
             label: 'Jakość agenta',
-            data: agents.map(a => a.avgAgentQuality),
-            backgroundColor: agents.map(a =>
-              a.avgAgentQuality >= 7 ? '#22c55e99' : a.avgAgentQuality >= 5 ? '#eab30899' : '#ef444499'
+            data: qualityValues,
+            backgroundColor: qualityValues.map(v =>
+              v >= 7 ? '#22c55e99' : v >= 5 ? '#eab30899' : '#ef444499'
             ),
-            borderColor: agents.map(a =>
-              a.avgAgentQuality >= 7 ? '#22c55e' : a.avgAgentQuality >= 5 ? '#eab308' : '#ef4444'
+            borderColor: qualityValues.map(v =>
+              v >= 7 ? '#22c55e' : v >= 5 ? '#eab308' : '#ef4444'
             ),
             borderWidth: 1,
           },
