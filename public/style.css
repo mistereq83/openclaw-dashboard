@@ -252,6 +252,41 @@ nav { flex: 1; padding: 12px 0; }
   letter-spacing: 0.8px;
 }
 
+.mini-cost-table {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  margin: -8px 0 24px;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.35);
+}
+
+.mini-cost-header {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.mini-cost-body {
+  display: grid;
+  gap: 6px;
+}
+
+.mini-cost-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.mini-cost-value {
+  font-family: 'Fira Code', monospace;
+  color: var(--text-primary);
+}
+
 /* Charts */
 .charts-row {
   display: grid;

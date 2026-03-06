@@ -80,6 +80,10 @@ const app = {
       const data = await this.api('/stats/overview');
       this.overviewData = data;
       this.buildAgentNav(data.agents);
+      if (document.getElementById('stat-today-cost')) {
+        document.getElementById('stat-today-cost').textContent = '$' + (data.totalTodayCost || 0).toFixed(4);
+      }
+      this.renderTodayCostTable(data.todayCostPerAgent || []);
       // Populate agent filter
       const select = document.getElementById('overview-agent-filter');
       if (select && data.agents) {
@@ -203,6 +207,9 @@ const app = {
       document.getElementById('agent-messages-today').textContent = data.messagesToday;
       if (document.getElementById('agent-total-cost')) {
         document.getElementById('agent-total-cost').textContent = '$' + (data.totalCost || 0).toFixed(4);
+      }
+      if (document.getElementById('agent-today-cost')) {
+        document.getElementById('agent-today-cost').textContent = '$' + (data.todayCost || 0).toFixed(4);
       }
       if (document.getElementById('agent-total-cost-pln')) {
         document.getElementById('agent-total-cost-pln').textContent = (data.totalCostPLN || 0).toFixed(2) + ' PLN';
@@ -337,6 +344,27 @@ const app = {
         <td>${a.lastActivity ? this.formatDate(a.lastActivity) : 'Brak'}</td>
       </tr>
     `).join('');
+  },
+
+  renderTodayCostTable(rows) {
+    const container = document.getElementById('today-cost-table');
+    if (!container) return;
+    if (!rows.length) {
+      container.innerHTML = '';
+      return;
+    }
+
+    const body = rows.map(r => `
+      <div class="mini-cost-row">
+        <span>${this.escapeHtml(r.name || r.agentId)}</span>
+        <span class="mini-cost-value">$${(r.todayCost || 0).toFixed(4)}</span>
+      </div>
+    `).join('');
+
+    container.innerHTML = `
+      <div class="mini-cost-header">Koszty per agent dziś</div>
+      <div class="mini-cost-body">${body}</div>
+    `;
   },
 
   // --- Sessions ---
@@ -627,7 +655,7 @@ const app = {
   refresh() {
     this.countdown = 60;
     switch (this.currentView) {
-      case 'overview': this.loadMonthlyOverview(); break;
+      case 'overview': this.loadOverview(); break;
       case 'agent': if (this.currentAgent) this.loadAgent(this.currentAgent); break;
       case 'compare': this.loadCompare(); break;
       case 'sessions': if (this.currentAgent) this.loadSessions(this.currentAgent); break;
