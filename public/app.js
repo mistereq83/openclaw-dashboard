@@ -74,25 +74,8 @@ const app = {
 
   // --- Overview ---
   async loadOverview() {
-    this.loadMonthlyOverview();
-    // Also load old overview for agent nav
-    try {
-      const data = await this.api('/stats/overview');
-      this.overviewData = data;
-      this.buildAgentNav(data.agents);
-      if (document.getElementById('stat-today-cost')) {
-        document.getElementById('stat-today-cost').textContent = '$' + (data.totalTodayCost || 0).toFixed(4);
-      }
-      this.renderTodayCostTable(data.todayCostPerAgent || []);
-      // Populate agent filter
-      const select = document.getElementById('overview-agent-filter');
-      if (select && data.agents) {
-        select.innerHTML = '<option value="">Wszyscy agenci</option>';
-        for (const a of data.agents) {
-          select.innerHTML += '<option value="' + a.agentId + '">' + this.getAgentName(a.agentId, data.agents) + '</option>';
-        }
-      }
-    } catch {}
+    // Single source: monthly endpoint handles everything (stats + todayCost)
+    await this.loadMonthlyOverview();
   },
 
   async loadMonthlyOverview() {
@@ -114,6 +97,19 @@ const app = {
         document.getElementById('stat-today-cost').textContent = '$' + (data.totalTodayCost || 0).toFixed(4);
       }
       this.renderTodayCostTable(data.todayCostPerAgent || []);
+
+      // Build agent nav + filter from monthly data
+      if (data.agents) {
+        this.overviewData = { agents: data.agents.map(a => ({ agentId: a.agent_id, ...a })) };
+        this.buildAgentNav(this.overviewData.agents);
+        const select = document.getElementById('overview-agent-filter');
+        if (select && !agentFilter) {
+          select.innerHTML = '<option value="">Wszyscy agenci</option>';
+          for (const a of data.agents) {
+            select.innerHTML += '<option value="' + (a.agent_id || a.agentId) + '">' + this.getAgentName(a.agent_id || a.agentId) + '</option>';
+          }
+        }
+      }
 
       this.renderDailyActivityChart(data);
       this.renderAgentBarsChart(data);
