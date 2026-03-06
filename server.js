@@ -187,9 +187,9 @@ app.get('/api/stats/overview', (req, res) => {
   let data = cache.get(cacheKey);
   if (!data) {
     const currentMonth = new Date().toISOString().slice(0, 7);
-    const totals = db.getOverviewTotals(currentMonth) || { agents: 0, sessions: 0, messages: 0, user_messages: 0, cost: 0 };
-    const todayCostAll = db.getTodayCostAll();
-    const totalTodayCost = db.getTotalTodayCost();
+    const totals = db.getOverviewTotals(currentMonth, AGENT_IDS) || { agents: 0, sessions: 0, messages: 0, user_messages: 0, cost: 0 };
+    const todayCostAll = db.getTodayCostAll(AGENT_IDS);
+    const totalTodayCost = db.getTotalTodayCost(AGENT_IDS);
 
     // Build agents array for nav (with basic stats from SQLite)
     const agents = AGENT_IDS.map(agentId => {
@@ -226,22 +226,25 @@ app.get('/api/stats/monthly', (req, res) => {
   const month = req.query.month || new Date().toISOString().slice(0, 7);
   const agentFilter = req.query.agent;
 
-  const totals = db.getOverviewTotals(month);
+  const activeIds = agentFilter ? [agentFilter] : AGENT_IDS;
+  const totals = db.getOverviewTotals(month, activeIds);
   const agents = agentFilter
     ? [db.getMonthlyStats(month, agentFilter)].filter(Boolean)
     : db.getMonthlyStats(month);
+  // Filter agents to only those in AGENT_IDS
+  const filteredAgents = (agents || []).filter(a => AGENT_IDS.includes(a.agent_id));
   const timeline = db.getDailyTimelineByAgent(month);
   const months = db.getAvailableMonths();
 
   // Group timeline by date for chart
-  const dailyTotals = db.getDailyTimeline(month);
+  const dailyTotals = db.getDailyTimeline(month, activeIds);
 
   // All costs come from SQLite (single source of truth)
   const fixedTotals = totals || { agents: 0, sessions: 0, messages: 0, user_messages: 0, cost: 0 };
 
   // Add today cost data
-  const todayCostAll = db.getTodayCostAll();
-  const totalTodayCost = db.getTotalTodayCost();
+  const todayCostAll = db.getTodayCostAll(AGENT_IDS);
+  const totalTodayCost = db.getTotalTodayCost(AGENT_IDS);
   const todayCostPerAgent = todayCostAll.map(r => ({
     agentId: r.agent_id,
     name: r.agent_name || getAgentDisplayName(r.agent_id),
@@ -251,7 +254,7 @@ app.get('/api/stats/monthly', (req, res) => {
   res.json({
     month,
     totals: fixedTotals,
-    agents: agents || [],
+    agents: filteredAgents,
     dailyTotals,
     timeline,
     availableMonths: months,
