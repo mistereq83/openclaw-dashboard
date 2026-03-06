@@ -109,6 +109,12 @@ const app = {
       document.getElementById('stat-total-agents').textContent = data.totals.agents || 0;
       document.getElementById('stat-total-cost').textContent = '$' + (data.totals.cost || 0).toFixed(4);
 
+      // Today cost from same endpoint (single source of truth)
+      if (document.getElementById('stat-today-cost')) {
+        document.getElementById('stat-today-cost').textContent = '$' + (data.totalTodayCost || 0).toFixed(4);
+      }
+      this.renderTodayCostTable(data.todayCostPerAgent || []);
+
       this.renderDailyActivityChart(data);
       this.renderAgentBarsChart(data);
     } catch (e) {

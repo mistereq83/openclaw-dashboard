@@ -20,12 +20,12 @@ function loadEnv() {
 loadEnv();
 
 const { getAgentDisplayName, AGENT_DISPLAY_NAMES, listSessions, getSessionMessages, searchSessions } = require('./lib/parser');
-const { getAgentStats, getOverviewStats, generateCsvExport } = require('./lib/stats');
+const { generateCsvExport, getAgentActivityVisuals } = require('./lib/stats');
 const { analyzeSession, analyzeBatch, checkOllamaStatus, OLLAMA_MODEL } = require('./lib/ollama');
 const { runDailyAnalysis, loadReport, listAvailableDays, getTrend } = require('./lib/daily-analysis');
 const scheduler = require('./lib/scheduler');
 const db = require('./lib/db');
-const { backfillStats, computeRecent } = require('./lib/stats-worker');
+const { backfillStats, computeRecent, computeToday } = require('./lib/stats-worker');
 const archiveWorker = require('./lib/archive-worker');
 const cache = require('./lib/cache');
 
@@ -73,20 +73,63 @@ app.get('/api/agents', (req, res) => {
   res.json(data);
 });
 
+function getTodayDateStr() {
+  return new Date().toISOString().split('T')[0];
+}
+
+function getWeekStartDateStr(today) {
+  const d = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const day = d.getDay();
+  const diff = (day + 6) % 7;
+  d.setDate(d.getDate() - diff);
+  return d.toISOString().split('T')[0];
+}
+
+function roundCost(value) {
+  return Math.round((value || 0) * 10000) / 10000;
+}
+
 // GET /api/agents/:name — detailed stats (supports ?month=2026-03)
 app.get('/api/agents/:name', (req, res) => {
   const agentId = req.params.name;
   if (!AGENT_IDS.includes(agentId)) {
     return res.status(404).json({ error: 'Agent not found' });
   }
-  const month = req.query.month || null;
+  const month = req.query.month || new Date().toISOString().slice(0, 7);
   const cacheKey = `agent-stats-${agentId}-${month || 'all'}`;
   let data = cache.get(cacheKey);
   if (!data) {
+    const detail = db.getAgentMonthlyDetail(month, agentId);
+    const monthStats = detail.month || {};
+    const todayStats = detail.today || {};
+    const weekStats = detail.week || {};
+    const visuals = getAgentActivityVisuals(STATE_DIR, agentId, month);
+    const allTimeCost = db.getAllTimeCost(agentId) || 0;
+    const avgPerDay = monthStats.active_days
+      ? Math.round((monthStats.user_messages / monthStats.active_days) * 10) / 10
+      : 0;
+    const lastActivity = monthStats.last_active ? `${monthStats.last_active}T23:59:59` : null;
+
     data = {
       id: agentId,
       name: getAgentDisplayName(agentId),
-      ...getAgentStats(STATE_DIR, agentId, month),
+      sessionsTotal: monthStats.sessions || 0,
+      sessionsWeek: weekStats.sessions || 0,
+      sessionsToday: todayStats.sessions || 0,
+      messagesTotal: monthStats.messages || 0,
+      userMessagesTotal: monthStats.user_messages || 0,
+      messagesToday: todayStats.messages || 0,
+      messagesWeek: weekStats.messages || 0,
+      avgPerDay,
+      lastActivity,
+      heatmap: visuals.heatmap,
+      timeline: visuals.timeline,
+      month: month || null,
+      totalCost: roundCost(monthStats.cost || 0),
+      totalCostPLN: Math.round((monthStats.cost || 0) * 4 * 100) / 100,
+      todayCost: roundCost(todayStats.cost || 0),
+      allTimeCost: roundCost(allTimeCost),
+      allTimeCostPLN: Math.round(allTimeCost * 4 * 100) / 100,
     };
     cache.set(cacheKey, data);
   }
@@ -138,12 +181,41 @@ app.get('/api/agents/:name/search', (req, res) => {
   res.json(results);
 });
 
-// GET /api/stats/overview — original (kept for backward compat)
+// GET /api/stats/overview — SQLite-based (single source of truth)
 app.get('/api/stats/overview', (req, res) => {
   const cacheKey = 'overview';
   let data = cache.get(cacheKey);
   if (!data) {
-    data = getOverviewStats(STATE_DIR, AGENT_IDS);
+    const currentMonth = new Date().toISOString().slice(0, 7);
+    const totals = db.getOverviewTotals(currentMonth) || { agents: 0, sessions: 0, messages: 0, user_messages: 0, cost: 0 };
+    const todayCostAll = db.getTodayCostAll();
+    const totalTodayCost = db.getTotalTodayCost();
+
+    // Build agents array for nav (with basic stats from SQLite)
+    const agents = AGENT_IDS.map(agentId => {
+      const detail = db.getAgentMonthlyDetail(currentMonth, agentId);
+      const m = detail.month || {};
+      return {
+        agentId,
+        lastActivity: m.last_active ? `${m.last_active}T23:59:59` : null,
+        sessionsTotal: m.sessions || 0,
+        userMessagesTotal: m.user_messages || 0,
+        totalCost: roundCost(m.cost || 0),
+      };
+    });
+
+    const todayCostPerAgent = todayCostAll.map(r => ({
+      agentId: r.agent_id,
+      name: r.agent_name || getAgentDisplayName(r.agent_id),
+      todayCost: roundCost(r.cost),
+    }));
+
+    data = {
+      agents,
+      totalCost: roundCost(totals.cost || 0),
+      totalTodayCost: roundCost(totalTodayCost),
+      todayCostPerAgent,
+    };
     cache.set(cacheKey, data);
   }
   res.json(data);
@@ -164,35 +236,27 @@ app.get('/api/stats/monthly', (req, res) => {
   // Group timeline by date for chart
   const dailyTotals = db.getDailyTimeline(month);
 
-  // Cost: compute from live JSONL via getAgentStats (single source of truth)
-  // SQLite cost is unreliable due to timezone/assignment issues
-  const liveAgentIds = agentFilter ? [agentFilter] : AGENT_IDS;
-  let liveCost = 0;
-  const agentsWithCost = [];
-  for (const aid of liveAgentIds) {
-    const agentStats = getAgentStats(STATE_DIR, aid, month);
-    liveCost += agentStats.totalCost || 0;
-    agentsWithCost.push({ agent_id: aid, liveCost: agentStats.totalCost || 0 });
-  }
+  // All costs come from SQLite (single source of truth)
+  const fixedTotals = totals || { agents: 0, sessions: 0, messages: 0, user_messages: 0, cost: 0 };
 
-  // Override SQLite cost with live cost
-  const fixedTotals = totals
-    ? { ...totals, cost: Math.round(liveCost * 10000) / 10000 }
-    : { agents: 0, sessions: 0, messages: 0, user_messages: 0, cost: 0 };
-
-  // Also fix per-agent cost in agents array
-  const fixedAgents = (agents || []).map(a => {
-    const match = agentsWithCost.find(x => x.agent_id === a.agent_id);
-    return match ? { ...a, cost: Math.round(match.liveCost * 10000) / 10000 } : a;
-  });
+  // Add today cost data
+  const todayCostAll = db.getTodayCostAll();
+  const totalTodayCost = db.getTotalTodayCost();
+  const todayCostPerAgent = todayCostAll.map(r => ({
+    agentId: r.agent_id,
+    name: r.agent_name || getAgentDisplayName(r.agent_id),
+    todayCost: roundCost(r.cost),
+  }));
 
   res.json({
     month,
     totals: fixedTotals,
-    agents: fixedAgents,
+    agents: agents || [],
     dailyTotals,
     timeline,
     availableMonths: months,
+    totalTodayCost: roundCost(totalTodayCost),
+    todayCostPerAgent,
   });
 });
 
@@ -367,6 +431,19 @@ app.listen(PORT, () => {
   } catch (err) {
     console.error('Backfill error:', err.message);
   }
+
+  // Compute fresh stats for today on startup
+  try {
+    computeRecent(STATE_DIR, AGENT_IDS);
+    console.log('Recent stats computed (today + yesterday)');
+  } catch (err) {
+    console.error('computeRecent error:', err.message);
+  }
+
+  // Refresh today stats every 60 seconds
+  setInterval(() => {
+    try { computeToday(STATE_DIR, AGENT_IDS); } catch (e) { /* silent */ }
+  }, 60000);
 
   // Start message archival worker (run now + every 5 min)
   try {
