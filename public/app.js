@@ -537,6 +537,8 @@ const app = {
       paulinag: 'Paulina Grunau',
       katarzynag: 'Katarzyna Goll',
       katarzynac: 'Katarzyna Chrzanowska',
+      krzysztofc: 'Krzysztof Ciarkowski',
+      dominikag: 'Dominika Gacoń',
     };
     return names[agentId] || agentId;
   },
