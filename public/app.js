@@ -763,6 +763,24 @@ const app = {
     }
   },
 
+
+  async resetAnalysis() {
+    if (!confirm("Na pewno wyczyścić wszystkie analizy AI? Tej operacji nie można cofnąć.")) return;
+    try {
+      const tokenParam = window.DASHBOARD_TOKEN ? "?token=" + window.DASHBOARD_TOKEN : "";
+      const res = await fetch("/api/analysis/reset" + tokenParam, { method: "DELETE" });
+      const data = await res.json();
+      if (data.ok) {
+        alert("✅ Usunięto " + data.deleted + " analiz.");
+        this.loadAnalysis();
+      } else {
+        alert("❌ Błąd: " + (data.error || "Unknown"));
+      }
+    } catch (e) {
+      alert("❌ Błąd połączenia: " + e.message);
+    }
+  },
+
   async checkOllamaStatus() {
     try {
       const status = await this.api('/analysis/status');
