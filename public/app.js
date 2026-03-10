@@ -541,6 +541,7 @@ const app = {
       katarzynac: 'Katarzyna Chrzanowska',
       krzysztofc: 'Krzysztof Ciarkowski',
       dominikag: 'Dominika Gacoń',
+      pavlo: 'Pavlo Borysovets',
     };
     return names[agentId] || agentId;
   },
