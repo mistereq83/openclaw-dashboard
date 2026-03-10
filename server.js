@@ -417,12 +417,27 @@ app.post('/api/archive/run', (req, res) => {
   }
 });
 
-// DELETE /api/analysis/reset — clear all AI analysis reports
+// DELETE /api/analysis/reset — clear all AI analysis reports + JSON files
 app.delete("/api/analysis/reset", (req, res) => {
   try {
+    // 1. Clear SQLite
     const deleted = db.getDb().prepare("DELETE FROM analysis_reports").run();
+    
+    // 2. Clear JSON report files from disk
+    const { DATA_DIR } = require("./lib/daily-analysis");
+    let filesDeleted = 0;
+    if (fs.existsSync(DATA_DIR)) {
+      const files = fs.readdirSync(DATA_DIR).filter(f => f.endsWith(".json"));
+      for (const file of files) {
+        fs.unlinkSync(path.join(DATA_DIR, file));
+        filesDeleted++;
+      }
+    }
+    
+    // 3. Clear cache
     cache.clear();
-    res.json({ ok: true, deleted: deleted.changes });
+    
+    res.json({ ok: true, deleted: deleted.changes, filesDeleted });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
