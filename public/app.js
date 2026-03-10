@@ -767,8 +767,10 @@ const app = {
   async resetAnalysis() {
     if (!confirm("Na pewno wyczyścić wszystkie analizy AI? Tej operacji nie można cofnąć.")) return;
     try {
-      const tokenParam = window.DASHBOARD_TOKEN ? "?token=" + window.DASHBOARD_TOKEN : "";
-      const res = await fetch("/api/analysis/reset" + tokenParam, { method: "DELETE" });
+      const headers = {};
+      if (this.token) headers["Authorization"] = "Bearer " + this.token;
+      const res = await fetch("/api/analysis/reset", { method: "DELETE", headers });
+      if (res.status === 401) { this.logout(); return; }
       const data = await res.json();
       if (data.ok) {
         alert("✅ Usunięto " + data.deleted + " analiz.");
