@@ -417,6 +417,17 @@ app.post('/api/archive/run', (req, res) => {
   }
 });
 
+// DELETE /api/analysis/reset — clear all AI analysis reports
+app.delete("/api/analysis/reset", (req, res) => {
+  try {
+    const deleted = db.getDb().prepare("DELETE FROM analysis_reports").run();
+    cache.clear();
+    res.json({ ok: true, deleted: deleted.changes });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // SPA fallback
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
