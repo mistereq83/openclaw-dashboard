@@ -87,7 +87,11 @@ function getWeekStartDateStr(today) {
 }
 
 function roundCost(value) {
-  return Math.round((value || 0) * 10000) / 10000;
+  // Hard guard: NEVER return negative costs (OpenClaw openrouter bug writes token counts as cost)
+  // Also cap at $10000 — anything higher is certainly a bug (token count, not dollars)
+  const v = Math.round((value || 0) * 10000) / 10000;
+  if (v < 0 || v > 10000) return 0;
+  return v;
 }
 
 // GET /api/agents/:name — detailed stats (supports ?month=2026-03)
