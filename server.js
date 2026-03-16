@@ -20,6 +20,7 @@ function loadEnv() {
 loadEnv();
 
 const { getAgentDisplayName, AGENT_DISPLAY_NAMES, listSessions, getSessionMessages, searchSessions } = require('./lib/parser');
+const pricingModule = require('./lib/pricing');
 const { generateCsvExport, getAgentActivityVisuals } = require('./lib/stats');
 const { analyzeSession, analyzeBatch, checkOllamaStatus, OLLAMA_MODEL } = require('./lib/ollama');
 const { runDailyAnalysis, loadReport, listAvailableDays, getTrend } = require('./lib/daily-analysis');
@@ -443,6 +444,11 @@ app.delete("/api/analysis/reset", (req, res) => {
   }
 });
 
+// GET /api/pricing — current pricing table and OpenRouter auto models
+app.get('/api/pricing', (req, res) => {
+  res.json(pricingModule.getPricingTable());
+});
+
 // SPA fallback
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
@@ -452,6 +458,9 @@ app.listen(PORT, () => {
   console.log(`OpenClaw Dashboard running on http://localhost:${PORT}`);
   console.log(`Agents: ${AGENT_IDS.map(id => `${id} (${getAgentDisplayName(id)})`).join(', ')}`);
   console.log(`State dir: ${STATE_DIR}`);
+
+  // Init live pricing from OpenRouter (caches 24h, async)
+  pricingModule.init();
 
   // Backfill historical stats into SQLite (runs once, fast on subsequent starts)
   try {
