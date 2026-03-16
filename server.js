@@ -462,6 +462,14 @@ app.listen(PORT, () => {
   // Init live pricing from OpenRouter (caches 24h, async)
   pricingModule.init();
 
+  // Fix negative costs in messages archive (OpenClaw openrouter bug)
+  try {
+    const fixed = db.fixNegativeCosts();
+    if (fixed > 0) console.log(`Fixed ${fixed} negative cost entries in archive`);
+  } catch (err) {
+    console.error('fixNegativeCosts error:', err.message);
+  }
+
   // Backfill historical stats into SQLite (runs once, fast on subsequent starts)
   try {
     backfillStats(STATE_DIR, AGENT_IDS, 90);
