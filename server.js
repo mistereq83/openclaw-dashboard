@@ -579,6 +579,9 @@ app.listen(PORT, () => {
   scheduler.start(STATE_DIR, AGENT_IDS);
 
   // OpenRouter cost reconciliation (if Management Key configured)
+  // Always cleanup bad data first (regardless of key)
+  try { reconciliation.cleanupBadReconciliation(); } catch (e) { /* ignore */ }
+
   if (reconciliation.isEnabled()) {
     console.log('[Reconciliation] Management key detected — starting cost reconciliation');
     // Backfill last 30 days on startup (one-time catch-up)

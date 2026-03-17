@@ -569,6 +569,20 @@ const app = {
     return (b / (1024 * 1024)).toFixed(1) + ' MB';
   },
 
+  // Return sane cost: prefer reconciled if valid, else estimated, cap at $1000
+  safeCost(agent) {
+    const rc = agent.reconciled_cost;
+    const ec = agent.estimated_cost || 0;
+    if (rc != null && rc > 0 && rc < 1000) return rc;
+    if (ec > 0 && ec < 1000) return ec;
+    return 0;
+  },
+
+  isReconciled(agent) {
+    const rc = agent.reconciled_cost;
+    return rc != null && rc > 0 && rc < 1000;
+  },
+
   formatNumber(n) {
     if (!n || n === 0) return '0';
     if (n < 1000) return n.toString();
@@ -1316,9 +1330,44 @@ const app = {
   },
 
   async loadTokenTimeline(agentFilter) {
-    // For now, just create a simple chart placeholder
-    // Could be enhanced to show daily token trends
-    this.renderTokenChart([]);
+    try {
+      // Fetch per-agent data for timeline (use each agent or filtered)
+      const agents = agentFilter ? [agentFilter] : (window.AGENT_IDS || []);
+      const month = new Date().toISOString().slice(0, 7);
+      const now = new Date();
+      const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+      
+      // Build day labels for current month
+      const labels = [];
+      const dataMap = {};
+      for (let d = 1; d <= daysInMonth; d++) {
+        const day = `${month}-${String(d).padStart(2, '0')}`;
+        labels.push(day);
+        dataMap[day] = 0;
+      }
+
+      // Aggregate tokens per day across all selected agents
+      for (const agentId of agents) {
+        try {
+          const fromDate = `${month}-01`;
+          const toDate = `${month}-${String(daysInMonth).padStart(2, '0')}`;
+          const data = await this.api(`/tokens?agent=${agentId}&from=${fromDate}&to=${toDate}`);
+          if (data.stats) {
+            for (const row of data.stats) {
+              if (dataMap[row.date] !== undefined) {
+                dataMap[row.date] += row.total_tokens || 0;
+              }
+            }
+          }
+        } catch (e) { /* skip agent */ }
+      }
+
+      const chartData = labels.map(d => dataMap[d] || 0);
+      this.renderTokenChart(labels, chartData);
+    } catch (e) {
+      console.error('Error loading token timeline:', e);
+      this.renderTokenChart([], []);
+    }
   },
 
   renderTokenStats() {
@@ -1329,8 +1378,8 @@ const app = {
       input: sum.input + (agent.input_tokens || 0),
       output: sum.output + (agent.output_tokens || 0),
       cache: sum.cache + (agent.cache_read_tokens || 0) + (agent.cache_write_tokens || 0),
-      cost: sum.cost + (agent.reconciled_cost != null ? agent.reconciled_cost : (agent.estimated_cost || 0)),
-      hasReconciled: sum.hasReconciled || agent.reconciled_cost != null
+      cost: sum.cost + this.safeCost(agent),
+      hasReconciled: sum.hasReconciled || (agent.reconciled_cost != null && agent.reconciled_cost > 0 && agent.reconciled_cost < 1000)
     }), { input: 0, output: 0, cache: 0, cost: 0, hasReconciled: false });
 
     document.getElementById('token-total-input').textContent = this.formatNumber(totals.input);
@@ -1358,7 +1407,7 @@ const app = {
         <td>${this.formatNumber(agent.cache_write_tokens || 0)}</td>
         <td><strong>${this.formatNumber(agent.total_tokens || 0)}</strong></td>
         <td>${this.formatNumber(agent.message_count || 0)}</td>
-        <td>${agent.reconciled_cost != null ? '✓' : '~'} $${(agent.reconciled_cost != null ? agent.reconciled_cost : (agent.estimated_cost || 0)).toFixed(4)}</td>
+        <td>${this.isReconciled(agent) ? '✓' : '~'} $${this.safeCost(agent).toFixed(4)}</td>
         <td>
           <button class="btn btn-sm" onclick="app.showTokenModelBreakdown('${agent.agent_id}')">
             Modele
@@ -1368,8 +1417,7 @@ const app = {
     `).join('');
   },
 
-  renderTokenChart(timeline) {
-    // Simple placeholder chart - could be enhanced with real timeline data
+  renderTokenChart(labels, data) {
     const canvas = document.getElementById('chart-tokens-timeline');
     if (!canvas || !canvas.getContext) return;
 
@@ -1377,16 +1425,20 @@ const app = {
       this.charts.tokensTimeline.destroy();
     }
 
+    // Shorten labels to day number only (e.g. "2026-03-17" → "17")
+    const shortLabels = (labels || []).map(d => d ? d.split('-')[2] : '');
+
     this.charts.tokensTimeline = new Chart(canvas, {
-      type: 'line',
+      type: 'bar',
       data: {
-        labels: ['Placeholder'],
+        labels: shortLabels,
         datasets: [{
           label: 'Total Tokens',
-          data: [0],
+          data: data || [],
+          backgroundColor: 'rgba(59, 130, 246, 0.6)',
           borderColor: '#3b82f6',
-          backgroundColor: 'rgba(59, 130, 246, 0.1)',
-          tension: 0.3
+          borderWidth: 1,
+          borderRadius: 3,
         }]
       },
       options: {
@@ -1394,7 +1446,26 @@ const app = {
         maintainAspectRatio: false,
         scales: {
           y: {
-            beginAtZero: true
+            beginAtZero: true,
+            ticks: {
+              callback: (v) => {
+                if (v >= 1000000) return (v / 1000000).toFixed(1) + 'M';
+                if (v >= 1000) return (v / 1000).toFixed(0) + 'K';
+                return v;
+              }
+            }
+          }
+        },
+        plugins: {
+          tooltip: {
+            callbacks: {
+              label: (ctx) => {
+                const v = ctx.raw || 0;
+                if (v >= 1000000) return 'Total: ' + (v / 1000000).toFixed(2) + 'M tokens';
+                if (v >= 1000) return 'Total: ' + (v / 1000).toFixed(1) + 'K tokens';
+                return 'Total: ' + v + ' tokens';
+              }
+            }
           }
         }
       }
@@ -1419,7 +1490,7 @@ const app = {
             <td>${this.formatNumber(model.cache_write_tokens || 0)}</td>
             <td><strong>${this.formatNumber(model.total_tokens || 0)}</strong></td>
             <td>${this.formatNumber(model.message_count || 0)}</td>
-            <td>${model.reconciled_cost != null ? '✓' : '~'} $${(model.reconciled_cost != null ? model.reconciled_cost : (model.estimated_cost || 0)).toFixed(4)}</td>
+            <td>${this.isReconciled(model) ? '✓' : '~'} $${this.safeCost(model).toFixed(4)}</td>
             <td>${model.active_days || 0}</td>
           </tr>
         `).join('');
@@ -1479,6 +1550,7 @@ const app = {
   async populateTokenAgentFilter() {
     try {
       const agents = await this.api('/agents');
+      window.AGENT_IDS = agents.map(a => a.id);
       const select = document.getElementById('token-agent-filter');
       select.innerHTML = '<option value="">Wszyscy agenci</option>';
       for (const agent of agents) {
