@@ -41,6 +41,7 @@ const app = {
       case 'agent': this.loadAgent(params.agentId); break;
       case 'compare': this.loadCompare(); break;
       case 'analysis': this.loadAnalysis(); break;
+      case 'tokens': this.loadTokenUsage(); break;
       case 'sessions': this.loadSessions(params.agentId); break;
       case 'session-detail': this.loadSessionDetail(params.agentId, params.sessionId); break;
     }
@@ -566,6 +567,13 @@ const app = {
     if (b < 1024) return b + ' B';
     if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB';
     return (b / (1024 * 1024)).toFixed(1) + ' MB';
+  },
+
+  formatNumber(n) {
+    if (!n || n === 0) return '0';
+    if (n < 1000) return n.toString();
+    if (n < 1000000) return (n / 1000).toFixed(1) + 'K';
+    return (n / 1000000).toFixed(1) + 'M';
   },
 
   escapeHtml(str) {
@@ -1229,6 +1237,220 @@ const app = {
     return res.json();
   },
 
+  // --- Token Usage ---
+  tokenData: null,
+  currentTokenPeriod: 'month',
+
+  async loadTokenUsage() {
+    const period = document.getElementById('token-period').value;
+    const agentFilter = document.getElementById('token-agent-filter').value;
+    this.currentTokenPeriod = period;
+
+    // Show/hide custom date inputs
+    const customDates = period === 'custom';
+    document.getElementById('token-date-from').style.display = customDates ? 'inline-block' : 'none';
+    document.getElementById('token-date-to').style.display = customDates ? 'inline-block' : 'none';
+
+    try {
+      let apiUrl;
+      if (period === 'month' || period === 'week' || period === 'today') {
+        // Use summary API for predefined periods
+        const month = new Date().toISOString().slice(0, 7); // YYYY-MM
+        apiUrl = `/tokens/summary?month=${month}`;
+        if (agentFilter) apiUrl += `&agent=${agentFilter}`;
+        
+        this.tokenData = await this.api(apiUrl);
+        await this.loadTokenTimeline(agentFilter);
+      } else if (period === 'custom') {
+        const dateFrom = document.getElementById('token-date-from').value;
+        const dateTo = document.getElementById('token-date-to').value;
+        if (!dateFrom || !dateTo) {
+          document.getElementById('tokens-table-body').innerHTML = 
+            '<tr><td colspan="9" class="empty-state">Wybierz zakres dat</td></tr>';
+          return;
+        }
+        
+        // For custom range, we need to call for each agent individually
+        this.tokenData = await this.loadCustomTokenRange(dateFrom, dateTo, agentFilter);
+      }
+
+      this.renderTokenStats();
+      this.renderTokenTable();
+    } catch (error) {
+      console.error('Error loading token usage:', error);
+      document.getElementById('tokens-table-body').innerHTML = 
+        '<tr><td colspan="9" class="empty-state">Błąd ładowania danych</td></tr>';
+    }
+  },
+
+  async loadCustomTokenRange(dateFrom, dateTo, agentFilter) {
+    const agents = agentFilter ? [agentFilter] : window.AGENT_IDS || [];
+    const results = [];
+    
+    for (const agentId of agents) {
+      try {
+        const data = await this.api(`/tokens?agent=${agentId}&from=${dateFrom}&to=${dateTo}`);
+        if (data.stats && data.stats.length > 0) {
+          // Aggregate all models for this agent
+          const aggregate = {
+            agent_id: agentId,
+            agent_name: data.agent_name,
+            input_tokens: data.stats.reduce((sum, s) => sum + (s.input_tokens || 0), 0),
+            output_tokens: data.stats.reduce((sum, s) => sum + (s.output_tokens || 0), 0),
+            cache_read_tokens: data.stats.reduce((sum, s) => sum + (s.cache_read_tokens || 0), 0),
+            cache_write_tokens: data.stats.reduce((sum, s) => sum + (s.cache_write_tokens || 0), 0),
+            total_tokens: data.stats.reduce((sum, s) => sum + (s.total_tokens || 0), 0),
+            message_count: data.stats.reduce((sum, s) => sum + (s.message_count || 0), 0),
+            estimated_cost: data.stats.reduce((sum, s) => sum + (s.estimated_cost || 0), 0),
+            active_days: [...new Set(data.stats.map(s => s.date))].length
+          };
+          results.push(aggregate);
+        }
+      } catch (error) {
+        console.error(`Error loading tokens for ${agentId}:`, error);
+      }
+    }
+    
+    return { stats: results };
+  },
+
+  async loadTokenTimeline(agentFilter) {
+    // For now, just create a simple chart placeholder
+    // Could be enhanced to show daily token trends
+    this.renderTokenChart([]);
+  },
+
+  renderTokenStats() {
+    const stats = this.tokenData?.stats || [];
+    
+    // Calculate totals
+    const totals = stats.reduce((sum, agent) => ({
+      input: sum.input + (agent.input_tokens || 0),
+      output: sum.output + (agent.output_tokens || 0),
+      cache: sum.cache + (agent.cache_read_tokens || 0) + (agent.cache_write_tokens || 0),
+      cost: sum.cost + (agent.estimated_cost || 0)
+    }), { input: 0, output: 0, cache: 0, cost: 0 });
+
+    document.getElementById('token-total-input').textContent = this.formatNumber(totals.input);
+    document.getElementById('token-total-output').textContent = this.formatNumber(totals.output);
+    document.getElementById('token-total-cache').textContent = this.formatNumber(totals.cache);
+    document.getElementById('token-total-cost').textContent = '$' + totals.cost.toFixed(4);
+  },
+
+  renderTokenTable() {
+    const stats = this.tokenData?.stats || [];
+    const tbody = document.getElementById('tokens-table-body');
+    
+    if (stats.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="9" class="empty-state">Brak danych dla wybranego okresu</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = stats.map(agent => `
+      <tr>
+        <td><strong>${this.escapeHtml(agent.agent_name || agent.agent_id)}</strong></td>
+        <td>${this.formatNumber(agent.input_tokens || 0)}</td>
+        <td>${this.formatNumber(agent.output_tokens || 0)}</td>
+        <td>${this.formatNumber(agent.cache_read_tokens || 0)}</td>
+        <td>${this.formatNumber(agent.cache_write_tokens || 0)}</td>
+        <td><strong>${this.formatNumber(agent.total_tokens || 0)}</strong></td>
+        <td>${this.formatNumber(agent.message_count || 0)}</td>
+        <td>$${(agent.estimated_cost || 0).toFixed(4)}</td>
+        <td>
+          <button class="btn btn-sm" onclick="app.showTokenModelBreakdown('${agent.agent_id}')">
+            Modele
+          </button>
+        </td>
+      </tr>
+    `).join('');
+  },
+
+  renderTokenChart(timeline) {
+    // Simple placeholder chart - could be enhanced with real timeline data
+    const canvas = document.getElementById('chart-tokens-timeline');
+    if (!canvas || !canvas.getContext) return;
+
+    if (this.charts.tokensTimeline) {
+      this.charts.tokensTimeline.destroy();
+    }
+
+    this.charts.tokensTimeline = new Chart(canvas, {
+      type: 'line',
+      data: {
+        labels: ['Placeholder'],
+        datasets: [{
+          label: 'Total Tokens',
+          data: [0],
+          borderColor: '#3b82f6',
+          backgroundColor: 'rgba(59, 130, 246, 0.1)',
+          tension: 0.3
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          y: {
+            beginAtZero: true
+          }
+        }
+      }
+    });
+  },
+
+  async showTokenModelBreakdown(agentId) {
+    try {
+      const month = new Date().toISOString().slice(0, 7);
+      const data = await this.api(`/tokens/summary?month=${month}&agent=${agentId}`);
+      
+      const breakdown = document.getElementById('token-model-breakdown');
+      const tbody = document.getElementById('token-model-table-body');
+      
+      if (data.stats && data.stats.length > 0) {
+        tbody.innerHTML = data.stats.map(model => `
+          <tr>
+            <td><strong>${this.escapeHtml(model.model || 'unknown')}</strong></td>
+            <td>${this.formatNumber(model.input_tokens || 0)}</td>
+            <td>${this.formatNumber(model.output_tokens || 0)}</td>
+            <td>${this.formatNumber(model.cache_read_tokens || 0)}</td>
+            <td>${this.formatNumber(model.cache_write_tokens || 0)}</td>
+            <td><strong>${this.formatNumber(model.total_tokens || 0)}</strong></td>
+            <td>${this.formatNumber(model.message_count || 0)}</td>
+            <td>$${(model.estimated_cost || 0).toFixed(4)}</td>
+            <td>${model.active_days || 0}</td>
+          </tr>
+        `).join('');
+        breakdown.style.display = 'block';
+      } else {
+        tbody.innerHTML = '<tr><td colspan="9" class="empty-state">Brak danych dla tego agenta</td></tr>';
+        breakdown.style.display = 'block';
+      }
+      
+      // Scroll to breakdown
+      breakdown.scrollIntoView({ behavior: 'smooth' });
+    } catch (error) {
+      console.error('Error loading model breakdown:', error);
+      alert('Błąd ładowania szczegółów modeli');
+    }
+  },
+
+  refreshTokens() {
+    this.loadTokenUsage();
+  },
+
+  async populateTokenAgentFilter() {
+    try {
+      const agents = await this.api('/agents');
+      const select = document.getElementById('token-agent-filter');
+      select.innerHTML = '<option value="">Wszyscy agenci</option>';
+      for (const agent of agents) {
+        select.innerHTML += '<option value="' + agent.id + '">' + this.escapeHtml(agent.name) + '</option>';
+      }
+    } catch (error) {
+      console.error('Error populating token agent filter:', error);
+    }
+  },
+
   // --- Init ---
   init() {
     if (!this.checkAuth()) return;
@@ -1247,6 +1469,7 @@ const app = {
     });
 
     this.setupTableSort();
+    this.populateTokenAgentFilter();
     this.startAutoRefresh();
     this.navigate('overview');
   },

@@ -37,6 +37,9 @@
         <a href="#" class="nav-item" data-view="analysis">
           <span class="nav-icon">&#9881;</span> Analiza AI
         </a>
+        <a href="#" class="nav-item" data-view="tokens">
+          <span class="nav-icon">&#128202;</span> Token Usage
+        </a>
         <div class="nav-divider">Agenci</div>
         <div id="agent-nav"></div>
       </nav>
@@ -271,6 +274,105 @@
 
         <!-- Session details -->
         <div id="analysis-details" style="margin-top:20px;"></div>
+      </div>
+
+      <!-- Token Usage View -->
+      <div id="view-tokens" class="view">
+        <div class="page-header">
+          <h2>Token Usage</h2>
+          <div class="header-actions">
+            <button class="btn btn-sm" onclick="app.refreshTokens()">&#x21bb; Odśwież</button>
+          </div>
+        </div>
+
+        <!-- Filters -->
+        <div class="filters-bar">
+          <select id="token-period" class="input" onchange="app.loadTokenUsage()">
+            <option value="today">Dziś</option>
+            <option value="week">Ten tydzień</option>
+            <option value="month" selected>Ten miesiąc</option>
+            <option value="custom">Niestandardowy zakres</option>
+          </select>
+          <input type="date" id="token-date-from" class="input" style="display:none;" onchange="app.loadTokenUsage()">
+          <input type="date" id="token-date-to" class="input" style="display:none;" onchange="app.loadTokenUsage()">
+          <select id="token-agent-filter" class="input" onchange="app.loadTokenUsage()">
+            <option value="">Wszyscy agenci</option>
+          </select>
+        </div>
+
+        <!-- Token Summary Stats -->
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-value" id="token-total-input">-</div>
+            <div class="stat-label">Input Tokens</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="token-total-output">-</div>
+            <div class="stat-label">Output Tokens</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="token-total-cache">-</div>
+            <div class="stat-label">Cache Tokens</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="token-total-cost">-</div>
+            <div class="stat-label">Koszt (USD)</div>
+          </div>
+        </div>
+
+        <!-- Token Usage Chart -->
+        <div class="chart-card">
+          <h3>Zużycie tokenów w czasie</h3>
+          <canvas id="chart-tokens-timeline"></canvas>
+        </div>
+
+        <!-- Token Usage Table -->
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Agent</th>
+                <th>Input</th>
+                <th>Output</th>
+                <th>Cache Read</th>
+                <th>Cache Write</th>
+                <th>Total</th>
+                <th>Messages</th>
+                <th>Est. Cost</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="tokens-table-body">
+              <tr>
+                <td colspan="9" class="empty-state">Ładowanie danych o tokenach...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Model Breakdown (shown on drill-down) -->
+        <div id="token-model-breakdown" style="display:none;">
+          <h3>Breakdown per model</h3>
+          <div class="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>Model</th>
+                  <th>Input</th>
+                  <th>Output</th>
+                  <th>Cache Read</th>
+                  <th>Cache Write</th>
+                  <th>Total</th>
+                  <th>Messages</th>
+                  <th>Est. Cost</th>
+                  <th>Days Active</th>
+                </tr>
+              </thead>
+              <tbody id="token-model-table-body">
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
 
       <!-- Session Detail View -->

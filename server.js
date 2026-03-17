@@ -279,6 +279,53 @@ app.post('/api/stats/backfill', async (req, res) => {
   }
 });
 
+// GET /api/tokens?agent=X&from=YYYY-MM-DD&to=YYYY-MM-DD — tokeny per agent per dzień
+app.get('/api/tokens', (req, res) => {
+  const agentId = req.query.agent;
+  const dateFrom = req.query.from || new Date(Date.now() - 30 * 86400000).toISOString().split('T')[0]; // 30 dni wstecz
+  const dateTo = req.query.to || new Date().toISOString().split('T')[0];
+  
+  if (!agentId) {
+    return res.status(400).json({ error: 'Agent ID required' });
+  }
+  
+  if (!AGENT_IDS.includes(agentId)) {
+    return res.status(404).json({ error: 'Agent not found' });
+  }
+
+  try {
+    const stats = db.getTokenStatsByAgent(agentId, dateFrom, dateTo);
+    res.json({
+      agent_id: agentId,
+      agent_name: getAgentDisplayName(agentId),
+      date_from: dateFrom,
+      date_to: dateTo,
+      stats
+    });
+  } catch (error) {
+    console.error('[API] /api/tokens error:', error);
+    res.status(500).json({ error: 'Failed to get token stats' });
+  }
+});
+
+// GET /api/tokens/summary?month=2026-03&agent=X — podsumowanie per agent per miesiąc
+app.get('/api/tokens/summary', (req, res) => {
+  const month = req.query.month || new Date().toISOString().slice(0, 7);
+  const agentId = req.query.agent;
+  
+  try {
+    const stats = db.getTokenStatsSummary(month, agentId);
+    res.json({
+      month,
+      agent_id: agentId || 'all',
+      stats
+    });
+  } catch (error) {
+    console.error('[API] /api/tokens/summary error:', error);
+    res.status(500).json({ error: 'Failed to get token summary' });
+  }
+});
+
 // GET /api/stats/export?agent=...&from=...&to=...
 app.get('/api/stats/export', (req, res) => {
   const agentId = req.query.agent;
