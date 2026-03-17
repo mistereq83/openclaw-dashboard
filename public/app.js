@@ -1276,6 +1276,7 @@ const app = {
 
       this.renderTokenStats();
       this.renderTokenTable();
+      this.loadReconciliationStatus();
     } catch (error) {
       console.error('Error loading token usage:', error);
       document.getElementById('tokens-table-body').innerHTML = 
@@ -1328,13 +1329,15 @@ const app = {
       input: sum.input + (agent.input_tokens || 0),
       output: sum.output + (agent.output_tokens || 0),
       cache: sum.cache + (agent.cache_read_tokens || 0) + (agent.cache_write_tokens || 0),
-      cost: sum.cost + (agent.estimated_cost || 0)
-    }), { input: 0, output: 0, cache: 0, cost: 0 });
+      cost: sum.cost + (agent.reconciled_cost != null ? agent.reconciled_cost : (agent.estimated_cost || 0)),
+      hasReconciled: sum.hasReconciled || agent.reconciled_cost != null
+    }), { input: 0, output: 0, cache: 0, cost: 0, hasReconciled: false });
 
     document.getElementById('token-total-input').textContent = this.formatNumber(totals.input);
     document.getElementById('token-total-output').textContent = this.formatNumber(totals.output);
     document.getElementById('token-total-cache').textContent = this.formatNumber(totals.cache);
-    document.getElementById('token-total-cost').textContent = '$' + totals.cost.toFixed(4);
+    const costLabel = totals.hasReconciled ? '✓ $' : '~ $';
+    document.getElementById('token-total-cost').textContent = costLabel + totals.cost.toFixed(4);
   },
 
   renderTokenTable() {
@@ -1355,7 +1358,7 @@ const app = {
         <td>${this.formatNumber(agent.cache_write_tokens || 0)}</td>
         <td><strong>${this.formatNumber(agent.total_tokens || 0)}</strong></td>
         <td>${this.formatNumber(agent.message_count || 0)}</td>
-        <td>$${(agent.estimated_cost || 0).toFixed(4)}</td>
+        <td>${agent.reconciled_cost != null ? '✓' : '~'} $${(agent.reconciled_cost != null ? agent.reconciled_cost : (agent.estimated_cost || 0)).toFixed(4)}</td>
         <td>
           <button class="btn btn-sm" onclick="app.showTokenModelBreakdown('${agent.agent_id}')">
             Modele
@@ -1416,7 +1419,7 @@ const app = {
             <td>${this.formatNumber(model.cache_write_tokens || 0)}</td>
             <td><strong>${this.formatNumber(model.total_tokens || 0)}</strong></td>
             <td>${this.formatNumber(model.message_count || 0)}</td>
-            <td>$${(model.estimated_cost || 0).toFixed(4)}</td>
+            <td>${model.reconciled_cost != null ? '✓' : '~'} $${(model.reconciled_cost != null ? model.reconciled_cost : (model.estimated_cost || 0)).toFixed(4)}</td>
             <td>${model.active_days || 0}</td>
           </tr>
         `).join('');
@@ -1436,6 +1439,41 @@ const app = {
 
   refreshTokens() {
     this.loadTokenUsage();
+    this.loadReconciliationStatus();
+  },
+
+  async loadReconciliationStatus() {
+    try {
+      const status = await this.api('/reconciliation/status');
+      const badge = document.getElementById('reconciliation-badge');
+      if (!badge) return;
+      if (status.enabled) {
+        badge.textContent = `✓ ${status.reconciledDays}d verified`;
+        badge.style.background = '#22c55e';
+        badge.style.color = '#fff';
+      } else {
+        badge.textContent = '~ estimated';
+        badge.style.background = '#eab308';
+        badge.style.color = '#000';
+      }
+    } catch (e) { /* silent */ }
+  },
+
+  async triggerReconciliation() {
+    try {
+      const btn = event.target;
+      btn.disabled = true;
+      btn.textContent = '⏳ Reconciling...';
+      const result = await this.api('/reconciliation/run', { method: 'POST' });
+      btn.textContent = `✓ ${result.reconciled || 0} days`;
+      setTimeout(() => { btn.textContent = '✔ Reconcile'; btn.disabled = false; }, 3000);
+      this.loadTokenUsage();
+    } catch (e) {
+      console.error('Reconciliation failed:', e);
+      alert('Reconciliation failed — check if OPENROUTER_MGMT_KEY is set');
+      event.target.textContent = '✔ Reconcile';
+      event.target.disabled = false;
+    }
   },
 
   async populateTokenAgentFilter() {

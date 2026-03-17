@@ -28,6 +28,7 @@ const scheduler = require('./lib/scheduler');
 const db = require('./lib/db');
 const { backfillStats, computeRecent, computeToday } = require('./lib/stats-worker');
 const archiveWorker = require('./lib/archive-worker');
+const reconciliation = require('./lib/reconciliation');
 const cache = require('./lib/cache');
 
 const app = express();
@@ -326,6 +327,31 @@ app.get('/api/tokens/summary', (req, res) => {
   }
 });
 
+// GET /api/reconciliation/status — reconciliation status
+app.get('/api/reconciliation/status', (req, res) => {
+  res.json(reconciliation.getStatus());
+});
+
+// POST /api/reconciliation/run — trigger reconciliation (last 30 days or specific date)
+app.post('/api/reconciliation/run', async (req, res) => {
+  try {
+    if (!reconciliation.isEnabled()) {
+      return res.status(400).json({ error: 'OPENROUTER_MGMT_KEY not configured' });
+    }
+    const date = req.query.date;
+    if (date) {
+      const result = await reconciliation.reconcileDate(date);
+      res.json(result);
+    } else {
+      const results = await reconciliation.reconcileRange(30);
+      res.json({ days: results.length, reconciled: results.filter(r => r.status === 'ok').length, results });
+    }
+  } catch (error) {
+    console.error('[API] /api/reconciliation/run error:', error);
+    res.status(500).json({ error: 'Reconciliation failed' });
+  }
+});
+
 // GET /api/stats/export?agent=...&from=...&to=...
 app.get('/api/stats/export', (req, res) => {
   const agentId = req.query.agent;
@@ -551,4 +577,21 @@ app.listen(PORT, () => {
 
   // Start nightly analysis scheduler
   scheduler.start(STATE_DIR, AGENT_IDS);
+
+  // OpenRouter cost reconciliation (if Management Key configured)
+  if (reconciliation.isEnabled()) {
+    console.log('[Reconciliation] Management key detected — starting cost reconciliation');
+    // Backfill last 30 days on startup (one-time catch-up)
+    reconciliation.reconcileRange(30).then(results => {
+      const ok = results.filter(r => r.status === 'ok').length;
+      console.log(`[Reconciliation] Backfill complete: ${ok}/${results.length} days reconciled`);
+    }).catch(err => console.error('[Reconciliation] Backfill error:', err.message));
+
+    // Reconcile today + yesterday every 15 minutes
+    setInterval(() => {
+      reconciliation.reconcileRecent().catch(e => console.error('[Reconciliation] Periodic error:', e.message));
+    }, 15 * 60 * 1000);
+  } else {
+    console.log('[Reconciliation] No OPENROUTER_MGMT_KEY — costs will be estimated only');
+  }
 });

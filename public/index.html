@@ -279,8 +279,9 @@
       <!-- Token Usage View -->
       <div id="view-tokens" class="view">
         <div class="page-header">
-          <h2>Token Usage</h2>
+          <h2>Token Usage <span id="reconciliation-badge" style="font-size:0.6em; padding:2px 8px; border-radius:4px; margin-left:8px;"></span></h2>
           <div class="header-actions">
+            <button class="btn btn-sm" onclick="app.triggerReconciliation()" title="Reconcile costs with OpenRouter Activity API">&#x2714; Reconcile</button>
             <button class="btn btn-sm" onclick="app.refreshTokens()">&#x21bb; Odśwież</button>
           </div>
         </div>
@@ -316,7 +317,7 @@
           </div>
           <div class="stat-card">
             <div class="stat-value" id="token-total-cost">-</div>
-            <div class="stat-label">Koszt (USD)</div>
+            <div class="stat-label">Koszt (✓ verified / ~ estimated)</div>
           </div>
         </div>
 
@@ -338,7 +339,7 @@
                 <th>Cache Write</th>
                 <th>Total</th>
                 <th>Messages</th>
-                <th>Est. Cost</th>
+                <th>Koszt</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -364,7 +365,7 @@
                   <th>Cache Write</th>
                   <th>Total</th>
                   <th>Messages</th>
-                  <th>Est. Cost</th>
+                  <th>Koszt</th>
                   <th>Days Active</th>
                 </tr>
               </thead>
