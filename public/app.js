@@ -1345,17 +1345,39 @@ const app = {
 
   async loadTokenTimeline(agentFilter) {
     try {
-      // Fetch per-agent data for timeline (use each agent or filtered)
       const agents = agentFilter ? [agentFilter] : (window.AGENT_IDS || []);
-      const month = new Date().toISOString().slice(0, 7);
       const now = new Date();
-      const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+      const period = this.currentTokenPeriod || 'month';
       
-      // Build day labels for current month
+      // Calculate date range based on selected period
+      let fromDate, toDate;
+      const todayStr = now.toISOString().split('T')[0];
+      
+      if (period === 'today') {
+        fromDate = todayStr;
+        toDate = todayStr;
+      } else if (period === 'week') {
+        const d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const day = d.getDay();
+        const diff = (day + 6) % 7;
+        d.setDate(d.getDate() - diff);
+        fromDate = d.toISOString().split('T')[0];
+        toDate = todayStr;
+      } else {
+        // month or custom
+        const month = now.toISOString().slice(0, 7);
+        const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+        fromDate = `${month}-01`;
+        toDate = `${month}-${String(daysInMonth).padStart(2, '0')}`;
+      }
+      
+      // Build day labels for the range
       const labels = [];
       const dataMap = {};
-      for (let d = 1; d <= daysInMonth; d++) {
-        const day = `${month}-${String(d).padStart(2, '0')}`;
+      const start = new Date(fromDate);
+      const end = new Date(toDate);
+      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        const day = d.toISOString().split('T')[0];
         labels.push(day);
         dataMap[day] = 0;
       }
@@ -1363,8 +1385,6 @@ const app = {
       // Aggregate tokens per day across all selected agents
       for (const agentId of agents) {
         try {
-          const fromDate = `${month}-01`;
-          const toDate = `${month}-${String(daysInMonth).padStart(2, '0')}`;
           const data = await this.api(`/tokens?agent=${agentId}&from=${fromDate}&to=${toDate}`);
           if (data.stats) {
             for (const row of data.stats) {
