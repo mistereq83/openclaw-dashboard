@@ -269,26 +269,6 @@ app.get('/api/stats/monthly', (req, res) => {
   });
 });
 
-// GET /api/debug/cost-test — test cost calculation for a single JSONL line
-app.get('/api/debug/cost-test', (req, res) => {
-  const { estimateCostFromTokens } = require('./lib/parser');
-  const pricingModule = require('./lib/pricing');
-  
-  const testUsage = { input: 2342111, output: 29955, cacheRead: 2898349 };
-  const models = ['openrouter/auto', 'auto', 'unknown'];
-  const results = {};
-  
-  for (const m of models) {
-    results[m] = estimateCostFromTokens(testUsage, m);
-  }
-  
-  results._pricingSource = pricingModule.getPricingTable().source;
-  results._defaultAutoModel = pricingModule.getPricingTable().defaultAutoModel;
-  results._autoDefaultPricing = pricingModule.getAutoDefaultPricing();
-  
-  res.json(results);
-});
-
 // POST /api/stats/backfill — trigger backfill (one-time setup)
 app.post('/api/stats/backfill', async (req, res) => {
   const days = Math.min(parseInt(req.query.days || '90', 10), 365);
