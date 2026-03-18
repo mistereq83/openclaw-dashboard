@@ -309,15 +309,30 @@ app.get('/api/tokens', (req, res) => {
   }
 });
 
-// GET /api/tokens/summary?month=2026-03&agent=X — podsumowanie per agent per miesiąc
+// GET /api/tokens/summary?month=2026-03&agent=X&from=2026-03-18&to=2026-03-18 — podsumowanie per agent
+// If from/to are provided, they take priority over month (enables today/week/custom filtering)
 app.get('/api/tokens/summary', (req, res) => {
-  const month = req.query.month || new Date().toISOString().slice(0, 7);
   const agentId = req.query.agent;
+  const dateFrom = req.query.from;
+  const dateTo = req.query.to;
   
   try {
-    const stats = db.getTokenStatsSummary(month, agentId);
+    let stats;
+    let meta;
+    
+    if (dateFrom && dateTo) {
+      // Date range mode (today, week, custom)
+      stats = db.getTokenStatsSummaryRange(dateFrom, dateTo, agentId);
+      meta = { from: dateFrom, to: dateTo };
+    } else {
+      // Monthly mode (backward compatible)
+      const month = req.query.month || new Date().toISOString().slice(0, 7);
+      stats = db.getTokenStatsSummary(month, agentId);
+      meta = { month };
+    }
+    
     res.json({
-      month,
+      ...meta,
       agent_id: agentId || 'all',
       stats
     });

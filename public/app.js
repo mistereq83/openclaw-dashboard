@@ -1268,9 +1268,23 @@ const app = {
     try {
       let apiUrl;
       if (period === 'month' || period === 'week' || period === 'today') {
-        // Use summary API for predefined periods
-        const month = new Date().toISOString().slice(0, 7); // YYYY-MM
-        apiUrl = `/tokens/summary?month=${month}`;
+        const now = new Date();
+        const todayStr = now.toISOString().split('T')[0];
+        
+        if (period === 'today') {
+          apiUrl = `/tokens/summary?from=${todayStr}&to=${todayStr}`;
+        } else if (period === 'week') {
+          const d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+          const day = d.getDay();
+          const diff = (day + 6) % 7; // days since Monday
+          d.setDate(d.getDate() - diff);
+          const weekStart = d.toISOString().split('T')[0];
+          apiUrl = `/tokens/summary?from=${weekStart}&to=${todayStr}`;
+        } else {
+          // month — full current month
+          const month = now.toISOString().slice(0, 7);
+          apiUrl = `/tokens/summary?month=${month}`;
+        }
         if (agentFilter) apiUrl += `&agent=${agentFilter}`;
         
         this.tokenData = await this.api(apiUrl);
